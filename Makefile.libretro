@@ -104,8 +104,11 @@ else
 endif
 
 ifeq ($(SAVESTATE_ROLLBACK),1)
+        $(info enabling RETRO_ROLLBACK_SAVESTATES for lean rollback buffers)
         SAVESTATE_DEFS = -DRETRO_ROLLBACK_SAVESTATES=1
         BUILDFLAGS += CPPFLAGS+=$(SAVESTATE_DEFS) CFLAGS+=$(SAVESTATE_DEFS) CXXFLAGS+=$(SAVESTATE_DEFS)
+else
+        $(info RETRO_ROLLBACK_SAVESTATES disabled; using standard savestate layout)
 endif
 
 ###########################################################################
