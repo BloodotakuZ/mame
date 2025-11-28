@@ -934,22 +934,42 @@ void retro_unload_game(void)
       retro_pause = -1;
 }
 
+static retro_savestate_context current_savestate_context()
+{
+   int context = RETRO_SAVESTATE_CONTEXT_NORMAL;
+
+   if (environ_cb)
+      environ_cb(RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT, &context);
+
+   return (retro_savestate_context)context;
+}
+
 /* Stubs */
 size_t retro_serialize_size(void)
 {
    if (     mame_machine_manager::instance() != NULL
-	      && mame_machine_manager::instance()->machine() != NULL
-	      && ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
-      return ram_state::get_size(mame_machine_manager::instance()->machine()->save());
+              && mame_machine_manager::instance()->machine() != NULL
+              && ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
+   {
+      save_manager &save = mame_machine_manager::instance()->machine()->save();
+      return (current_savestate_context() == RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY)
+            ? save.rollback_state_size()
+            : ram_state::get_size(save);
+   }
 
    return 0;
 }
 bool retro_serialize(void *data, size_t size)
 {
    if (     mame_machine_manager::instance() != NULL
-	      && mame_machine_manager::instance()->machine() != NULL
-	      && ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
-      return (mame_machine_manager::instance()->machine()->save().write_buffer((u8*)data, size) == STATERR_NONE);
+              && mame_machine_manager::instance()->machine() != NULL
+              && ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
+   {
+      save_manager &save = mame_machine_manager::instance()->machine()->save();
+      return (current_savestate_context() == RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY)
+            ? (save.write_rollback_buffer((u8*)data, size) == STATERR_NONE)
+            : (save.write_buffer((u8*)data, size) == STATERR_NONE);
+   }
 
    return false;
 }
@@ -958,7 +978,12 @@ bool retro_unserialize(const void *data, size_t size)
    if (     mame_machine_manager::instance() != NULL
          && mame_machine_manager::instance()->machine() != NULL
          &&	ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
-      return (mame_machine_manager::instance()->machine()->save().read_buffer((u8*)data, size) == STATERR_NONE);
+   {
+      save_manager &save = mame_machine_manager::instance()->machine()->save();
+      return (current_savestate_context() == RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY)
+            ? (save.read_rollback_buffer((u8*)data, size) == STATERR_NONE)
+            : (save.read_buffer((u8*)data, size) == STATERR_NONE);
+   }
 
    return false;
 }
