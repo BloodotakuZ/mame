@@ -304,11 +304,14 @@ public:
 	save_error write_file(util::core_file &file);
 	save_error read_file(util::core_file &file);
 
-	save_error write_stream(std::ostream &str);
-	save_error read_stream(std::istream &str);
+        save_error write_stream(std::ostream &str);
+        save_error read_stream(std::istream &str);
 
-	save_error write_buffer(void *buf, size_t size);
-	save_error read_buffer(const void *buf, size_t size);
+        save_error write_buffer(void *buf, size_t size);
+        save_error read_buffer(const void *buf, size_t size);
+        save_error write_rollback_buffer(void *buf, size_t size);
+        save_error read_rollback_buffer(const void *buf, size_t size);
+        size_t rollback_state_size() const;
 
 private:
 	// state callback item
@@ -321,25 +324,29 @@ private:
 		save_prepost_delegate m_func;                 // delegate
 	};
 
-	// internal helpers
-	template <typename T, typename U, typename V, typename W>
-	save_error do_write(T check_space, U write_block, V start_header, W start_data);
-	template <typename T, typename U, typename V, typename W>
-	save_error do_read(T check_length, U read_block, V start_header, W start_data);
-	u32 signature() const;
-	void dump_registry() const;
-	static save_error validate_header(const u8 *header, const char *gamename, u32 signature, void (CLIB_DECL *errormsg)(const char *fmt, ...), const char *error_prefix);
+        // internal helpers
+        template <typename T, typename U, typename V, typename W>
+        save_error do_write(T check_space, U write_block, V start_header, W start_data);
+        template <typename T, typename U, typename V, typename W>
+        save_error do_read(T check_length, U read_block, V start_header, W start_data);
+        size_t state_size() const;
+        u32 signature() const;
+        void dump_registry() const;
+        static save_error validate_header(const u8 *header, const char *gamename, u32 signature, void (CLIB_DECL *errormsg)(const char *fmt, ...), const char *error_prefix);
 
-	// internal state
-	running_machine &         m_machine;              // reference to our machine
-	std::unique_ptr<rewinder> m_rewind;               // rewinder
-	bool                      m_reg_allowed;          // are registrations allowed?
-	bool                      m_supported;            // are saved states supported?
+        // internal state
+        running_machine &         m_machine;              // reference to our machine
+        std::unique_ptr<rewinder> m_rewind;               // rewinder
+        bool                      m_reg_allowed;          // are registrations allowed?
+        bool                      m_supported;            // are saved states supported?
+        mutable size_t            m_total_save_size;      // cached total save size including header
+        mutable u32               m_signature;            // cached signature of save entries
+        mutable bool              m_signature_valid;      // is the cached signature valid?
 
-	std::vector<std::unique_ptr<state_entry>>    m_entry_list;       // list of registered entries
-	std::vector<std::unique_ptr<ram_state>>      m_ramstate_list;    // list of ram states
-	std::vector<std::unique_ptr<state_callback>> m_presave_list;     // list of pre-save functions
-	std::vector<std::unique_ptr<state_callback>> m_postload_list;    // list of post-load functions
+        std::vector<std::unique_ptr<state_entry>>    m_entry_list;       // list of registered entries
+        std::vector<std::unique_ptr<ram_state>>      m_ramstate_list;    // list of ram states
+        std::vector<std::unique_ptr<state_callback>> m_presave_list;     // list of pre-save functions
+        std::vector<std::unique_ptr<state_callback>> m_postload_list;    // list of post-load functions
 };
 
 class ram_state
