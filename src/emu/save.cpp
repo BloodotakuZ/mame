@@ -30,6 +30,9 @@
 #include "util/ioprocs.h"
 #include "util/ioprocsfilter.h"
 
+#include <algorithm>
+#include <cstring>
+
 
 //**************************************************************************
 //  DEBUGGING
