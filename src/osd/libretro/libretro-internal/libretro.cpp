@@ -19,6 +19,10 @@
 #include "libretro_shared.h"
 #include "libretro_core_options.h"
 
+#ifndef RETRO_ROLLBACK_SAVESTATES
+#define RETRO_ROLLBACK_SAVESTATES 0
+#endif
+
 /* forward decls / externs / prototypes */
 
 extern void retro_finish();
@@ -936,12 +940,16 @@ void retro_unload_game(void)
 
 static retro_savestate_context current_savestate_context()
 {
+#if RETRO_ROLLBACK_SAVESTATES
    int context = RETRO_SAVESTATE_CONTEXT_NORMAL;
 
    if (environ_cb)
       environ_cb(RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT, &context);
 
    return (retro_savestate_context)context;
+#else
+   return RETRO_SAVESTATE_CONTEXT_NORMAL;
+#endif
 }
 
 /* Stubs */
@@ -952,7 +960,13 @@ size_t retro_serialize_size(void)
               && ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
    {
       save_manager &save = mame_machine_manager::instance()->machine()->save();
-      return (current_savestate_context() == RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY)
+      const bool rollback_context =
+#if RETRO_ROLLBACK_SAVESTATES
+            (current_savestate_context() == RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY);
+#else
+            false;
+#endif
+      return rollback_context
             ? save.rollback_state_size()
             : ram_state::get_size(save);
    }
@@ -966,7 +980,13 @@ bool retro_serialize(void *data, size_t size)
               && ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
    {
       save_manager &save = mame_machine_manager::instance()->machine()->save();
-      return (current_savestate_context() == RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY)
+      const bool rollback_context =
+#if RETRO_ROLLBACK_SAVESTATES
+            (current_savestate_context() == RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY);
+#else
+            false;
+#endif
+      return rollback_context
             ? (save.write_rollback_buffer((u8*)data, size) == STATERR_NONE)
             : (save.write_buffer((u8*)data, size) == STATERR_NONE);
    }
@@ -980,7 +1000,13 @@ bool retro_unserialize(const void *data, size_t size)
          &&	ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
    {
       save_manager &save = mame_machine_manager::instance()->machine()->save();
-      return (current_savestate_context() == RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY)
+      const bool rollback_context =
+#if RETRO_ROLLBACK_SAVESTATES
+            (current_savestate_context() == RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY);
+#else
+            false;
+#endif
+      return rollback_context
             ? (save.read_rollback_buffer((u8*)data, size) == STATERR_NONE)
             : (save.read_buffer((u8*)data, size) == STATERR_NONE);
    }

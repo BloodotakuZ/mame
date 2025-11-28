@@ -329,6 +329,8 @@ private:
         save_error do_write(T check_space, U write_block, V start_header, W start_data);
         template <typename T, typename U, typename V, typename W>
         save_error do_read(T check_length, U read_block, V start_header, W start_data);
+        void build_rollback_layout();
+        void clear_cache();
         size_t state_size() const;
         u32 signature() const;
         void dump_registry() const;
@@ -340,9 +342,20 @@ private:
         bool                      m_reg_allowed;          // are registrations allowed?
         bool                      m_supported;            // are saved states supported?
         mutable size_t            m_total_save_size;      // cached total save size including header
+        mutable size_t            m_rollback_save_size;   // cached rollback save size without header
         mutable u32               m_signature;            // cached signature of save entries
         mutable bool              m_signature_valid;      // is the cached signature valid?
 
+        struct rollback_block
+        {
+                const u8 *source;        // start of the data to copy out
+                u8 *target;              // start of the data to copy in
+                size_t blocksize;        // size of a single logical block
+                u32 blockcount;          // number of blocks in this range
+                u32 stride;              // distance between blocks when not packed
+        };
+
+        std::vector<rollback_block>      m_rollback_layout; // precomputed copy layout for rollback
         std::vector<std::unique_ptr<state_entry>>    m_entry_list;       // list of registered entries
         std::vector<std::unique_ptr<ram_state>>      m_ramstate_list;    // list of ram states
         std::vector<std::unique_ptr<state_callback>> m_presave_list;     // list of pre-save functions
