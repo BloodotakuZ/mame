@@ -94,11 +94,11 @@ static int l_checkmode (const char *mode) {
 
 #if !defined(l_getc)		/* { */
 
-#if defined(LUA_USE_POSIX)
+#if defined(LUA_USE_POSIX) && !defined(_WIN32)
 #define l_getc(f)		getc_unlocked(f)
 #define l_lockfile(f)		flockfile(f)
 #define l_unlockfile(f)		funlockfile(f)
-#elif defined(LUA_USE_WINDOWS)
+#elif defined(LUA_USE_WINDOWS) || defined(_WIN32)
 #define l_getc(f)		getc(f)
 #define l_lockfile(f)		((void)0)
 #define l_unlockfile(f)		((void)0)
