@@ -198,6 +198,27 @@ ifneq ($(findstring win,$(platform)),)
                 endif
         endif
 
+        # If the prefixed archiver is missing on MSYS2, fall back to the plain
+        # ar that ships with the mingw-w64 toolchain so archive steps don't
+        # point at a non-existent /mingwXX/bin/x86_64-w64-mingw32-ar.
+        ifneq ($(OS),Windows_NT)
+                ifeq ($(CROSS_AR),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/ar.exe),)
+                                CROSS_AR := $(MINGW_PREFIX)/bin/ar
+                        endif
+                else ifeq ($(wildcard $(CROSS_AR)$(EXE_EXT)),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/ar.exe),)
+                                CROSS_AR := $(MINGW_PREFIX)/bin/ar
+                        endif
+                endif
+        else
+                ifeq ($(CROSS_AR),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/ar.exe),)
+                                CROSS_AR := $(MINGW_PREFIX)/bin/ar
+                        endif
+                endif
+        endif
+
         ifeq ($(CROSS_CC),)
                 CROSS_CC  := $(MINGW_HOST)-gcc
                 CROSS_CXX := $(MINGW_HOST)-g++
