@@ -75,7 +75,7 @@
 
 #if !defined(l_getc)		/* { */
 
-#if defined(LUA_USE_POSIX) && !defined(_WIN32)
+#if defined(LUA_USE_POSIX) && !defined(_WIN32) && !defined(WIN32)
 #define l_getc(f)		getc_unlocked(f)
 #define l_lockfile(f)		flockfile(f)
 #define l_unlockfile(f)		funlockfile(f)
