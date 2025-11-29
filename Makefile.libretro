@@ -92,6 +92,10 @@ endif
 ###########################################################################
 
 BUILDFLAGS = REGENIE=$(REGENIE) VERBOSE=$(VERBOSE) NOWERROR=$(NOWERROR) OSD=retro NO_USE_MIDI=$(NO_USE_MIDI) NO_USE_PORTAUDIO=$(NO_USE_PORTAUDIO)
+# Ensure archive creation always uses the rebuilding "r" flag; some generated
+# mingw archives (e.g. liboptional.a) can have no members, and "-cs" alone is a
+# fatal error with binutils.
+BUILDFLAGS += ARFLAGS=rcs
 
 ifneq ($(PYTHON_EXECUTABLE),)
         BUILDFLAGS += PYTHON_EXECUTABLE=$(PYTHON_EXECUTABLE)
