@@ -47,7 +47,7 @@
 */
 #if !defined(lua_stdin_is_tty)	/* { */
 
-#if defined(LUA_USE_POSIX)	/* { */
+#if defined(LUA_USE_POSIX) && !defined(LUA_USE_WINDOWS) && !defined(_WIN32) && !defined(WIN32)	/* { */
 
 #include <unistd.h>
 #define lua_stdin_is_tty()	isatty(0)
