@@ -12,7 +12,6 @@
 #ifdef __LIBRETRO__
 #include "render/drawretro.h"
 #else
-#include "render/drawnone.h"
 #include "render/drawbgfx.h"
 #if (USE_OPENGL)
 #include "render/drawogl.h"
