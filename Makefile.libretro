@@ -132,11 +132,29 @@ ifneq ($(findstring win,$(platform)),)
         endif
 
         # Keep the native toolchain for host-side generators and stash the
-        # requested MinGW cross tools for the target build.
-        CROSS_CC  := $(CC)
-        CROSS_CXX := $(CXX)
-        CROSS_AR  := $(AR)
-        CROSS_WINDRES := $(WINDRES)
+        # requested MinGW cross tools for the target build. Only honor user-
+        # supplied overrides so we don't treat make's built-in defaults (cc,
+        # g++, ar) as explicit cross choices.
+        ifeq ($(origin CC),default)
+                CROSS_CC :=
+        else
+                CROSS_CC := $(CC)
+        endif
+        ifeq ($(origin CXX),default)
+                CROSS_CXX :=
+        else
+                CROSS_CXX := $(CXX)
+        endif
+        ifeq ($(origin AR),default)
+                CROSS_AR :=
+        else
+                CROSS_AR := $(AR)
+        endif
+        ifeq ($(origin WINDRES),default)
+                CROSS_WINDRES :=
+        else
+                CROSS_WINDRES := $(WINDRES)
+        endif
 
         # Provide sensible MinGW defaults when the caller doesn't supply a
         # cross toolchain explicitly so "platform=win64" works out of the box
