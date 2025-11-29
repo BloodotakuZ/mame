@@ -58,7 +58,7 @@
 ** uses mkstemp.
 */
 
-#if defined(LUA_USE_POSIX)	/* { */
+#if defined(LUA_USE_POSIX) && !defined(LUA_USE_WINDOWS) && !defined(_WIN32) && !defined(WIN32)	/* { */
 
 #include <unistd.h>
 
@@ -92,7 +92,7 @@
 ** where it uses gmtime_r/localtime_r
 */
 
-#if defined(LUA_USE_POSIX)	/* { */
+#if defined(LUA_USE_POSIX) && !defined(LUA_USE_WINDOWS) && !defined(_WIN32) && !defined(WIN32)	/* { */
 
 #define l_gmtime(t,r)		gmtime_r(t,r)
 #define l_localtime(t,r)	localtime_r(t,r)
