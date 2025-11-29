@@ -120,27 +120,45 @@ endif
 PLATFLAGS =
 
 ifneq ($(findstring win,$(platform)),)
-	ifeq ($(MSYSTEM),MINGW64)
-		MINGW64 ?= /mingw64
-		PLATFLAGS += MINGW64=$(MINGW64)
-		LIBRETRO_CPU = x86_64
-	else ifeq ($(MSYSTEM),MINGW32)
-		MINGW32 ?= /mingw32
-		PLATFLAGS += MINGW32=$(MINGW32)
-		LIBRETRO_CPU = x86
-		PTR64=0
-	endif
-	CC  ?= cc
-	CXX ?= cxx
-	AR  ?= ar
-	PLATFLAGS += TARGETOS=windows OVERRIDE_CC=$(CC) OVERRIDE_CXX=$(CXX) AR=$(AR)
-	LLD := $(shell command -v lld 2> /dev/null)
-	ifneq ($(LLD),)
-		BUILDFLAGS += LDOPTS=-fuse-ld=lld
-	endif
-	ifneq ($(WINDRES),)
-		PLATFLAGS += WINDRES=$(WINDRES)
-	endif
+        ifeq ($(MSYSTEM),MINGW64)
+                MINGW64 ?= /mingw64
+                PLATFLAGS += MINGW64=$(MINGW64)
+                LIBRETRO_CPU = x86_64
+        else ifeq ($(MSYSTEM),MINGW32)
+                MINGW32 ?= /mingw32
+                PLATFLAGS += MINGW32=$(MINGW32)
+                LIBRETRO_CPU = x86
+                PTR64=0
+        endif
+
+        # Keep the native toolchain for host-side generators and stash the
+        # requested MinGW cross tools for the target build.
+        CROSS_CC  := $(CC)
+        CROSS_CXX := $(CXX)
+        CROSS_AR  := $(AR)
+        CROSS_WINDRES := $(WINDRES)
+        CC  :=
+        CXX :=
+        AR  :=
+
+        PLATFLAGS += TARGETOS=windows CROSS_BUILD=1
+        ifneq ($(CROSS_CC),)
+                PLATFLAGS += OVERRIDE_CC=$(CROSS_CC)
+        endif
+        ifneq ($(CROSS_CXX),)
+                PLATFLAGS += OVERRIDE_CXX=$(CROSS_CXX)
+        endif
+        ifneq ($(CROSS_AR),)
+                PLATFLAGS += AR=$(CROSS_AR)
+        endif
+
+        LLD := $(shell command -v lld 2> /dev/null)
+        ifneq ($(LLD),)
+                BUILDFLAGS += LDOPTS=-fuse-ld=lld
+        endif
+        ifneq ($(CROSS_WINDRES),)
+                PLATFLAGS += WINDRES=$(CROSS_WINDRES)
+        endif
 endif
 # android only needs a valid ANDROID_NDK_HOME set no paths are needed toolchain and makefile takes care of that
 # make CONFIG=libretero OSD=retro android-xxx is all thes required
