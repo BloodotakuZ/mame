@@ -13,6 +13,12 @@ REGENIE ?= 1
 GITHUB_REPO ?= https://github.com/libretro/mame/
 DEBUG ?= 0
 
+# Enable rollback-savestate optimizations in the libretro core by default.
+# Can be disabled by passing SAVESTATE_ROLLBACK=0 on the make command line
+# when targeting frontends without RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT
+# support.
+SAVESTATE_ROLLBACK ?= 1
+
 #see https://github.com/libretro/mame/blob/093209930f5fbdaee0d6f3a3666f3d70025d089f/3rdparty/genie/build/gmake.darwin/genie.make#L55C2-L55C47
 export LIBRETRO_OS
 #this make file need dont better ad use vars instead of the way it done again can wait till the mac builds work
@@ -88,13 +94,21 @@ endif
 BUILDFLAGS = REGENIE=$(REGENIE) VERBOSE=$(VERBOSE) NOWERROR=$(NOWERROR) OSD=retro NO_USE_MIDI=$(NO_USE_MIDI) NO_USE_PORTAUDIO=$(NO_USE_PORTAUDIO)
 
 ifneq ($(PYTHON_EXECUTABLE),)
-	BUILDFLAGS += PYTHON_EXECUTABLE=$(PYTHON_EXECUTABLE)
+        BUILDFLAGS += PYTHON_EXECUTABLE=$(PYTHON_EXECUTABLE)
 endif
 ifeq ($(DEBUG),1)
-	BUILDFLAGS += CONFIG=libretrodbg
-	BUILDFLAGS += SYMBOLS=1 SYMLEVEL=1 OPTIMIZE=g
+        BUILDFLAGS += CONFIG=libretrodbg
+        BUILDFLAGS += SYMBOLS=1 SYMLEVEL=1 OPTIMIZE=g
 else
-	BUILDFLAGS += CONFIG=libretro
+        BUILDFLAGS += CONFIG=libretro
+endif
+
+ifeq ($(SAVESTATE_ROLLBACK),1)
+        $(info enabling RETRO_ROLLBACK_SAVESTATES for lean rollback buffers)
+        SAVESTATE_DEFS = -DRETRO_ROLLBACK_SAVESTATES=1
+        BUILDFLAGS += CPPFLAGS+=$(SAVESTATE_DEFS) CFLAGS+=$(SAVESTATE_DEFS) CXXFLAGS+=$(SAVESTATE_DEFS)
+else
+        $(info RETRO_ROLLBACK_SAVESTATES disabled; using standard savestate layout)
 endif
 
 ###########################################################################
