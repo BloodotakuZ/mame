@@ -47,7 +47,7 @@
 
 #if !defined(l_popen)		/* { */
 
-#if defined(LUA_USE_POSIX)	/* { */
+#if defined(LUA_USE_POSIX) && !defined(LUA_USE_WINDOWS) && !defined(_WIN32) && !defined(WIN32)	/* { */
 
 #define l_popen(L,c,m)		(fflush(NULL), popen(c,m))
 #define l_pclose(L,file)	(pclose(file))
@@ -75,10 +75,14 @@
 
 #if !defined(l_getc)		/* { */
 
-#if defined(LUA_USE_POSIX)
+#if defined(LUA_USE_POSIX) && !defined(LUA_USE_WINDOWS) && !defined(_WIN32) && !defined(WIN32)
 #define l_getc(f)		getc_unlocked(f)
 #define l_lockfile(f)		flockfile(f)
 #define l_unlockfile(f)		funlockfile(f)
+#elif defined(LUA_USE_WINDOWS) || defined(_WIN32)
+#define l_getc(f)		getc(f)
+#define l_lockfile(f)		((void)0)
+#define l_unlockfile(f)		((void)0)
 #else
 #define l_getc(f)		getc(f)
 #define l_lockfile(f)		((void)0)
@@ -96,7 +100,7 @@
 
 #if !defined(l_fseek)		/* { */
 
-#if defined(LUA_USE_POSIX)	/* { */
+#if defined(LUA_USE_POSIX) && !defined(LUA_USE_WINDOWS) && !defined(_WIN32) && !defined(WIN32)	/* { */
 
 #include <sys/types.h>
 

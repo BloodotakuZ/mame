@@ -30,6 +30,9 @@
 #include "util/ioprocs.h"
 #include "util/ioprocsfilter.h"
 
+#include <algorithm>
+#include <cstring>
+
 
 //**************************************************************************
 //  DEBUGGING
@@ -65,11 +68,15 @@ enum
 //-------------------------------------------------
 
 save_manager::save_manager(running_machine &machine)
-	: m_machine(machine)
-	, m_reg_allowed(true)
-	, m_supported(false)
+        : m_machine(machine)
+        , m_reg_allowed(true)
+        , m_supported(false)
+        , m_total_save_size(0)
+        , m_rollback_save_size(0)
+        , m_signature(0)
+        , m_signature_valid(false)
 {
-	m_rewind = std::make_unique<rewinder>(*this);
+        m_rewind = std::make_unique<rewinder>(*this);
 }
 
 
@@ -80,13 +87,14 @@ save_manager::save_manager(running_machine &machine)
 
 void save_manager::allow_registration(bool allowed)
 {
-	// allow/deny registration
-	m_reg_allowed = allowed;
-	if (!allowed)
-	{
-		// look for duplicates
-		std::sort(m_entry_list.begin(), m_entry_list.end(),
-				[] (std::unique_ptr<state_entry> const& a, std::unique_ptr<state_entry> const& b) { return a->m_name < b->m_name; });
+        // allow/deny registration
+        m_reg_allowed = allowed;
+        clear_cache();
+        if (!allowed)
+        {
+                // look for duplicates
+                std::sort(m_entry_list.begin(), m_entry_list.end(),
+                                [] (std::unique_ptr<state_entry> const& a, std::unique_ptr<state_entry> const& b) { return a->m_name < b->m_name; });
 
 		int dupes_found = 0;
 		for (int i = 1; i < m_entry_list.size(); i++)
@@ -109,13 +117,18 @@ void save_manager::allow_registration(bool allowed)
 				m_supported = false;
 				break;
 			}
-		}
+                }
 
-		dump_registry();
+                dump_registry();
 
-		// everything is registered by now, evaluate the savestate size
-		m_rewind->clamp_capacity();
-	}
+                // precompute cached metadata now that the registry is stable
+                state_size();
+                build_rollback_layout();
+                signature();
+
+                // everything is registered by now, evaluate the savestate size
+                m_rewind->clamp_capacity();
+        }
 }
 
 
@@ -389,9 +402,9 @@ save_error save_manager::write_buffer(void *buf, size_t size)
 
 save_error save_manager::read_buffer(const void *buf, size_t size)
 {
-	const u8 *ptr = reinterpret_cast<const u8 *>(buf);
-	const u8 *const end = ptr + size;
-	return do_read(
+        const u8 *ptr = reinterpret_cast<const u8 *>(buf);
+        const u8 *const end = ptr + size;
+        return do_read(
 			[size] (size_t total_size) { return size == total_size; },
 			[&ptr, &end] (void *data, size_t size) -> bool
 			{
@@ -401,8 +414,166 @@ save_error save_manager::read_buffer(const void *buf, size_t size)
 				ptr += size;
 				return true;
 			},
-			[] () { return true; },
-			[] () { return true; });
+                        [] () { return true; },
+                        [] () { return true; });
+}
+
+
+//-------------------------------------------------
+//  write_rollback_buffer - write the current
+//  machine state without header metadata
+//-------------------------------------------------
+
+save_error save_manager::write_rollback_buffer(void *buf, size_t size)
+{
+        u8 *ptr = reinterpret_cast<u8 *>(buf);
+
+        if (m_rollback_layout.empty())
+                build_rollback_layout();
+
+        const size_t total_size = rollback_state_size();
+        if (size != total_size)
+                return STATERR_WRITE_ERROR;
+
+        dispatch_presave();
+
+        for (auto const &block : m_rollback_layout)
+        {
+                const size_t contiguous = block.blocksize * block.blockcount;
+                if (block.blocksize == block.stride)
+                {
+                        memcpy(ptr, block.source, contiguous);
+                        ptr += contiguous;
+                }
+                else
+                {
+                        const u8 *source = block.source;
+                        for (u32 b = 0; block.blockcount > b; ++b, source += block.stride)
+                        {
+                                memcpy(ptr, source, block.blocksize);
+                                ptr += block.blocksize;
+                        }
+                }
+        }
+
+        return STATERR_NONE;
+}
+
+
+//-------------------------------------------------
+//  read_rollback_buffer - restore the machine
+//  state from data without header metadata
+//-------------------------------------------------
+
+save_error save_manager::read_rollback_buffer(const void *buf, size_t size)
+{
+        const u8 *ptr = reinterpret_cast<const u8 *>(buf);
+        if (m_rollback_layout.empty())
+                build_rollback_layout();
+        const size_t total_size = rollback_state_size();
+        if (size != total_size)
+                return STATERR_READ_ERROR;
+
+        for (auto const &block : m_rollback_layout)
+        {
+                const size_t contiguous = block.blocksize * block.blockcount;
+                if (block.blocksize == block.stride)
+                {
+                        memcpy(block.target, ptr, contiguous);
+                        ptr += contiguous;
+                }
+                else
+                {
+                        u8 *target = block.target;
+                        for (u32 b = 0; block.blockcount > b; ++b, target += block.stride)
+                        {
+                                memcpy(target, ptr, block.blocksize);
+                                ptr += block.blocksize;
+                        }
+                }
+        }
+
+        dispatch_postload();
+
+        return STATERR_NONE;
+}
+
+
+//-------------------------------------------------
+//  rollback_state_size - get serialized size
+//  without header metadata
+//-------------------------------------------------
+
+size_t save_manager::rollback_state_size() const
+{
+        if (m_rollback_save_size == 0)
+        {
+                const size_t total_size = state_size();
+                m_rollback_save_size = (total_size >= HEADER_SIZE) ? total_size - HEADER_SIZE : 0;
+        }
+
+        return m_rollback_save_size;
+}
+
+
+//-------------------------------------------------
+//  state_size - get total serialized size
+//-------------------------------------------------
+
+size_t save_manager::state_size() const
+{
+        if (!m_reg_allowed && (m_total_save_size != 0))
+                return m_total_save_size;
+
+        size_t total_size = HEADER_SIZE;
+        for (const auto &entry : m_entry_list)
+                total_size += entry->m_typesize * entry->m_typecount * entry->m_blockcount;
+
+        if (!m_reg_allowed)
+        {
+                m_total_save_size = total_size;
+                m_rollback_save_size = (total_size >= HEADER_SIZE) ? total_size - HEADER_SIZE : 0;
+        }
+
+        return total_size;
+}
+
+
+//-------------------------------------------------
+//  build_rollback_layout - precompute copy order
+//-------------------------------------------------
+
+void save_manager::build_rollback_layout()
+{
+        m_rollback_layout.clear();
+        m_rollback_layout.reserve(m_entry_list.size());
+
+        for (auto &entry : m_entry_list)
+        {
+                rollback_block block{};
+                block.blocksize = entry->m_typesize * entry->m_typecount;
+                block.blockcount = entry->m_blockcount;
+                block.stride = entry->m_stride;
+                block.source = reinterpret_cast<const u8 *>(entry->m_data);
+                block.target = reinterpret_cast<u8 *>(entry->m_data);
+                m_rollback_layout.emplace_back(block);
+        }
+
+        if (m_rollback_save_size == 0)
+                rollback_state_size();
+}
+
+
+//-------------------------------------------------
+//  clear_cache - reset cached metadata
+//-------------------------------------------------
+
+void save_manager::clear_cache()
+{
+        m_signature_valid = false;
+        m_total_save_size = 0;
+        m_rollback_save_size = 0;
+        m_rollback_layout.clear();
 }
 
 
@@ -413,12 +584,10 @@ save_error save_manager::read_buffer(const void *buf, size_t size)
 template <typename T, typename U, typename V, typename W>
 inline save_error save_manager::do_write(T check_space, U write_block, V start_header, W start_data)
 {
-	// check for sufficient space
-	size_t total_size = HEADER_SIZE;
-	for (const auto &entry : m_entry_list)
-		total_size += entry->m_typesize * entry->m_typecount * entry->m_blockcount;
-	if (!check_space(total_size))
-		return STATERR_WRITE_ERROR;
+        // check for sufficient space
+        size_t total_size = state_size();
+        if (!check_space(total_size))
+                return STATERR_WRITE_ERROR;
 
 	// generate the header
 	u8 header[HEADER_SIZE];
@@ -456,12 +625,10 @@ inline save_error save_manager::do_write(T check_space, U write_block, V start_h
 template <typename T, typename U, typename V, typename W>
 inline save_error save_manager::do_read(T check_length, U read_block, V start_header, W start_data)
 {
-	// check for sufficient space
-	size_t total_size = HEADER_SIZE;
-	for (const auto &entry : m_entry_list)
-		total_size += entry->m_typesize * entry->m_typecount * entry->m_blockcount;
-	if (!check_length(total_size))
-		return STATERR_READ_ERROR;
+        // check for sufficient space
+        size_t total_size = state_size();
+        if (!check_length(total_size))
+                return STATERR_READ_ERROR;
 
 	// read the header and turn on compression for the rest of the file
 	u8 header[HEADER_SIZE];
@@ -504,22 +671,27 @@ inline save_error save_manager::do_read(T check_length, U read_block, V start_he
 
 u32 save_manager::signature() const
 {
-	// iterate over entries
-	util::crc32_creator crc;
-	for (auto &entry : m_entry_list)
-	{
-		// add the entry name to the CRC
+        if (!m_reg_allowed && m_signature_valid)
+                return m_signature;
+
+        // iterate over entries
+        util::crc32_creator crc;
+        for (auto &entry : m_entry_list)
+        {
+                // add the entry name to the CRC
 		crc.append(entry->m_name.data(), entry->m_name.length());
 
 		// add the type and size to the CRC
 		u32 temp[4];
 		temp[0] = little_endianize_int32(entry->m_typesize);
-		temp[1] = little_endianize_int32(entry->m_typecount);
-		temp[2] = little_endianize_int32(entry->m_blockcount);
-		temp[3] = 0;
-		crc.append(&temp[0], sizeof(temp));
-	}
-	return crc.finish();
+                temp[1] = little_endianize_int32(entry->m_typecount);
+                temp[2] = little_endianize_int32(entry->m_blockcount);
+                temp[3] = 0;
+                crc.append(&temp[0], sizeof(temp));
+        }
+        m_signature = crc.finish();
+        m_signature_valid = !m_reg_allowed;
+        return m_signature;
 }
 
 
@@ -617,12 +789,7 @@ ram_state::ram_state(save_manager &save)
 
 size_t ram_state::get_size(save_manager &save)
 {
-	size_t totalsize = 0;
-
-	for (auto &entry : save.m_entry_list)
-		totalsize += entry->m_typesize * entry->m_typecount * entry->m_blockcount;
-
-	return totalsize + HEADER_SIZE;
+        return save.state_size();
 }
 
 

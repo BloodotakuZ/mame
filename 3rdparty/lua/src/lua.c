@@ -37,7 +37,7 @@ static lua_State *globalL = NULL;
 static const char *progname = LUA_PROGNAME;
 
 
-#if defined(LUA_USE_POSIX)   /* { */
+#if defined(LUA_USE_POSIX) && !defined(LUA_USE_WINDOWS) && !defined(_WIN32) && !defined(WIN32)   /* { */
 
 /*
 ** Use 'sigaction' when available.
@@ -408,7 +408,7 @@ static int handle_luainit (lua_State *L) {
 */
 #if !defined(lua_stdin_is_tty)	/* { */
 
-#if defined(LUA_USE_POSIX)	/* { */
+#if defined(LUA_USE_POSIX) && !defined(LUA_USE_WINDOWS) && !defined(_WIN32) && !defined(WIN32)	/* { */
 
 #include <unistd.h>
 #define lua_stdin_is_tty()	isatty(0)
