@@ -23,6 +23,10 @@ export ARFLAGS
 # Make sure recursive makes keep the replace flag even if generated
 # makefiles reset ARFLAGS back to "-cs".
 MAKEFLAGS += ARFLAGS=-rcs
+# Tell the upstream makefile to thread ARFLAGS through its own recursive
+# invocations (e.g. windows_x64), so MinGW/MSYS2 archives always include
+# the replace operation even if the generated makefiles reset ARFLAGS.
+BUILDFLAGS += MAKEPARAMS+=ARFLAGS=-rcs
 
 # Enable rollback-savestate optimizations in the libretro core by default.
 # Can be disabled by passing SAVESTATE_ROLLBACK=0 on the make command line
@@ -410,12 +414,12 @@ MAKEFILE :=
 all: build
 
 build:
-	$(MAKE) $(BUILDFLAGS) $(PLATFLAGS) $(TARGETFLAGS)
+	$(MAKE) ARFLAGS=-rcs $(BUILDFLAGS) $(PLATFLAGS) $(TARGETFLAGS)
 
 vs2019:
-	$(MAKE) $(BUILDFLAGS) $(PLATFLAGS) $(TARGETFLAGS) vs2019
+	$(MAKE) ARFLAGS=-rcs $(BUILDFLAGS) $(PLATFLAGS) $(TARGETFLAGS) vs2019
 
 clean:
-	$(MAKE) $(BUILDFLAGS) $(PLATFLAGS) $(TARGETFLAGS) clean
+	$(MAKE) ARFLAGS=-rcs $(BUILDFLAGS) $(PLATFLAGS) $(TARGETFLAGS) clean
 
 .PHONY: all build clean vs2019
