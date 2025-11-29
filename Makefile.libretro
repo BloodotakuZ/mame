@@ -137,6 +137,32 @@ ifneq ($(findstring win,$(platform)),)
         CROSS_CXX := $(CXX)
         CROSS_AR  := $(AR)
         CROSS_WINDRES := $(WINDRES)
+
+        # Provide sensible MinGW defaults when the caller doesn't supply a
+        # cross toolchain explicitly so "platform=win64" works out of the box
+        # on typical mingw-w64 setups.
+        ifeq ($(CROSS_CC),)
+                ifeq ($(PTR64),0)
+                        CROSS_CC  := i686-w64-mingw32-gcc
+                        CROSS_CXX := i686-w64-mingw32-g++
+                        CROSS_AR  := i686-w64-mingw32-ar
+                        CROSS_WINDRES := i686-w64-mingw32-windres
+                        ifndef MINGW32
+                                MINGW32 := /usr/i686-w64-mingw32
+                        endif
+                        PLATFLAGS += MINGW32=$(MINGW32)
+                else
+                        CROSS_CC  := x86_64-w64-mingw32-gcc
+                        CROSS_CXX := x86_64-w64-mingw32-g++
+                        CROSS_AR  := x86_64-w64-mingw32-ar
+                        CROSS_WINDRES := x86_64-w64-mingw32-windres
+                        ifndef MINGW64
+                                MINGW64 := /usr/x86_64-w64-mingw32
+                        endif
+                        PLATFLAGS += MINGW64=$(MINGW64)
+                endif
+        endif
+
         CC  :=
         CXX :=
         AR  :=
