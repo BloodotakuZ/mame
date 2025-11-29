@@ -60,6 +60,13 @@
 	try { a } catch(...) { if ((c)->status == 0) (c)->status = -1; }
 #define luai_jmpbuf		int  /* dummy variable */
 
+#elif defined(_WIN32)				/* }{ */
+
+/* Windows setjmp/longjmp signatures differ from POSIX; avoid _setjmp */
+#define LUAI_THROW(L,c)         longjmp((c)->b, 1)
+#define LUAI_TRY(L,c,a)         if (setjmp((c)->b) == 0) { a }
+#define luai_jmpbuf             jmp_buf
+
 #elif defined(LUA_USE_POSIX)				/* }{ */
 
 /* in POSIX, try _longjmp/_setjmp (more efficient) */

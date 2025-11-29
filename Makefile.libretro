@@ -13,6 +13,18 @@ REGENIE ?= 1
 GITHUB_REPO ?= https://github.com/libretro/mame/
 DEBUG ?= 0
 
+# Always include the replace operation when creating archives. Some of the
+# generated MinGW makefiles override ARFLAGS to "-cs" (no operation), which
+# causes binutils ar to fail with "no operation specified" on recursive builds.
+override ARFLAGS := rcs
+export ARFLAGS
+
+# Enable rollback-savestate optimizations in the libretro core by default.
+# Can be disabled by passing SAVESTATE_ROLLBACK=0 on the make command line
+# when targeting frontends without RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT
+# support.
+SAVESTATE_ROLLBACK ?= 1
+
 #see https://github.com/libretro/mame/blob/093209930f5fbdaee0d6f3a3666f3d70025d089f/3rdparty/genie/build/gmake.darwin/genie.make#L55C2-L55C47
 export LIBRETRO_OS
 #this make file need dont better ad use vars instead of the way it done again can wait till the mac builds work
@@ -86,15 +98,27 @@ endif
 ###########################################################################
 
 BUILDFLAGS = REGENIE=$(REGENIE) VERBOSE=$(VERBOSE) NOWERROR=$(NOWERROR) OSD=retro NO_USE_MIDI=$(NO_USE_MIDI) NO_USE_PORTAUDIO=$(NO_USE_PORTAUDIO)
+# Ensure archive creation always uses the rebuilding "r" flag; some generated
+# mingw archives (e.g. liboptional.a) can have no members, and "-cs" alone is a
+# fatal error with binutils.
+BUILDFLAGS += ARFLAGS=rcs
 
 ifneq ($(PYTHON_EXECUTABLE),)
-	BUILDFLAGS += PYTHON_EXECUTABLE=$(PYTHON_EXECUTABLE)
+        BUILDFLAGS += PYTHON_EXECUTABLE=$(PYTHON_EXECUTABLE)
 endif
 ifeq ($(DEBUG),1)
-	BUILDFLAGS += CONFIG=libretrodbg
-	BUILDFLAGS += SYMBOLS=1 SYMLEVEL=1 OPTIMIZE=g
+        BUILDFLAGS += CONFIG=libretrodbg
+        BUILDFLAGS += SYMBOLS=1 SYMLEVEL=1 OPTIMIZE=g
 else
-	BUILDFLAGS += CONFIG=libretro
+        BUILDFLAGS += CONFIG=libretro
+endif
+
+ifeq ($(SAVESTATE_ROLLBACK),1)
+        $(info enabling RETRO_ROLLBACK_SAVESTATES for lean rollback buffers)
+        SAVESTATE_DEFS = -DRETRO_ROLLBACK_SAVESTATES=1
+        BUILDFLAGS += CPPFLAGS+=$(SAVESTATE_DEFS) CFLAGS+=$(SAVESTATE_DEFS) CXXFLAGS+=$(SAVESTATE_DEFS)
+else
+        $(info RETRO_ROLLBACK_SAVESTATES disabled; using standard savestate layout)
 endif
 
 ###########################################################################
@@ -106,27 +130,89 @@ endif
 PLATFLAGS =
 
 ifneq ($(findstring win,$(platform)),)
-	ifeq ($(MSYSTEM),MINGW64)
-		MINGW64 ?= /mingw64
-		PLATFLAGS += MINGW64=$(MINGW64)
-		LIBRETRO_CPU = x86_64
-	else ifeq ($(MSYSTEM),MINGW32)
-		MINGW32 ?= /mingw32
-		PLATFLAGS += MINGW32=$(MINGW32)
-		LIBRETRO_CPU = x86
-		PTR64=0
-	endif
-	CC  ?= cc
-	CXX ?= cxx
-	AR  ?= ar
-	PLATFLAGS += TARGETOS=windows OVERRIDE_CC=$(CC) OVERRIDE_CXX=$(CXX) AR=$(AR)
-	LLD := $(shell command -v lld 2> /dev/null)
-	ifneq ($(LLD),)
-		BUILDFLAGS += LDOPTS=-fuse-ld=lld
-	endif
-	ifneq ($(WINDRES),)
-		PLATFLAGS += WINDRES=$(WINDRES)
-	endif
+        ifeq ($(MSYSTEM),MINGW64)
+                MINGW64 ?= /mingw64
+                PLATFLAGS += MINGW64=$(MINGW64)
+                LIBRETRO_CPU = x86_64
+        else ifeq ($(MSYSTEM),MINGW32)
+                MINGW32 ?= /mingw32
+                PLATFLAGS += MINGW32=$(MINGW32)
+                LIBRETRO_CPU = x86
+                PTR64=0
+        endif
+
+        # Keep the native toolchain for host-side generators and stash the
+        # requested MinGW cross tools for the target build. Only honor user-
+        # supplied overrides so we don't treat make's built-in defaults (cc,
+        # g++, ar) as explicit cross choices.
+        ifeq ($(origin CC),default)
+                CROSS_CC :=
+        else
+                CROSS_CC := $(CC)
+        endif
+        ifeq ($(origin CXX),default)
+                CROSS_CXX :=
+        else
+                CROSS_CXX := $(CXX)
+        endif
+        ifeq ($(origin AR),default)
+                CROSS_AR :=
+        else
+                CROSS_AR := $(AR)
+        endif
+        ifeq ($(origin WINDRES),default)
+                CROSS_WINDRES :=
+        else
+                CROSS_WINDRES := $(WINDRES)
+        endif
+
+        # Provide sensible MinGW defaults when the caller doesn't supply a
+        # cross toolchain explicitly so "platform=win64" works out of the box
+        # on typical mingw-w64 setups.
+        ifeq ($(CROSS_CC),)
+                ifeq ($(PTR64),0)
+                        CROSS_CC  := i686-w64-mingw32-gcc
+                        CROSS_CXX := i686-w64-mingw32-g++
+                        CROSS_AR  := i686-w64-mingw32-ar
+                        CROSS_WINDRES := i686-w64-mingw32-windres
+                        ifndef MINGW32
+                                MINGW32 := /usr/i686-w64-mingw32
+                        endif
+                        PLATFLAGS += MINGW32=$(MINGW32)
+                else
+                        CROSS_CC  := x86_64-w64-mingw32-gcc
+                        CROSS_CXX := x86_64-w64-mingw32-g++
+                        CROSS_AR  := x86_64-w64-mingw32-ar
+                        CROSS_WINDRES := x86_64-w64-mingw32-windres
+                        ifndef MINGW64
+                                MINGW64 := /usr/x86_64-w64-mingw32
+                        endif
+                        PLATFLAGS += MINGW64=$(MINGW64)
+                endif
+        endif
+
+        CC  :=
+        CXX :=
+        AR  :=
+
+        PLATFLAGS += TARGETOS=windows CROSS_BUILD=1
+        ifneq ($(CROSS_CC),)
+                PLATFLAGS += OVERRIDE_CC=$(CROSS_CC)
+        endif
+        ifneq ($(CROSS_CXX),)
+                PLATFLAGS += OVERRIDE_CXX=$(CROSS_CXX)
+        endif
+        ifneq ($(CROSS_AR),)
+                PLATFLAGS += AR=$(CROSS_AR)
+        endif
+
+        LLD := $(shell command -v lld 2> /dev/null)
+        ifneq ($(LLD),)
+                BUILDFLAGS += LDOPTS=-fuse-ld=lld
+        endif
+        ifneq ($(CROSS_WINDRES),)
+                PLATFLAGS += WINDRES=$(CROSS_WINDRES)
+        endif
 endif
 # android only needs a valid ANDROID_NDK_HOME set no paths are needed toolchain and makefile takes care of that
 # make CONFIG=libretero OSD=retro android-xxx is all thes required
