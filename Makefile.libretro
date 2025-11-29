@@ -13,6 +13,12 @@ REGENIE ?= 1
 GITHUB_REPO ?= https://github.com/libretro/mame/
 DEBUG ?= 0
 
+# Always include the replace operation when creating archives. Some of the
+# generated MinGW makefiles override ARFLAGS to "-cs" (no operation), which
+# causes binutils ar to fail with "no operation specified" on recursive builds.
+override ARFLAGS := rcs
+export ARFLAGS
+
 # Enable rollback-savestate optimizations in the libretro core by default.
 # Can be disabled by passing SAVESTATE_ROLLBACK=0 on the make command line
 # when targeting frontends without RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT
