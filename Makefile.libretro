@@ -187,6 +187,16 @@ ifneq ($(findstring win,$(platform)),)
                 MINGW_PREFIX ?= /mingw64
         endif
 
+        # First, see if the host PATH already exposes a usable mingw-w64
+        # toolchain. This catches MSYS2 installs placed under custom prefixes
+        # (e.g. /d/a/_temp/msys64/mingw64) where /mingw64 isn't present.
+        ifeq ($(CROSS_CC),)
+                CROSS_CC := $(shell command -v $(MINGW_HOST)-gcc 2> /dev/null)
+                CROSS_CXX := $(shell command -v $(MINGW_HOST)-g++ 2> /dev/null)
+                CROSS_AR := $(shell command -v $(MINGW_HOST)-ar 2> /dev/null)
+                CROSS_WINDRES := $(shell command -v $(MINGW_HOST)-windres 2> /dev/null)
+        endif
+
         ifeq ($(CROSS_CC),)
                 ifeq ($(OS),Windows_NT)
                         ifneq ($(wildcard $(MINGW_PREFIX)/bin/$(MINGW_HOST)-gcc.exe),)
@@ -194,6 +204,20 @@ ifneq ($(findstring win,$(platform)),)
                                 CROSS_CXX := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-g++
                                 CROSS_AR  := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-ar
                                 CROSS_WINDRES := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-windres
+                        endif
+                endif
+        endif
+
+        # If we located a compiler on PATH but not an archiver, try to reuse
+        # the same bin directory so archive steps don't point at a nonexistent
+        # /mingwXX/bin.
+        ifeq ($(CROSS_AR),)
+                ifneq ($(filter %/,$(dir $(CROSS_CC))),)
+                        CROSS_BINDIR := $(dir $(CROSS_CC))
+                        ifneq ($(wildcard $(CROSS_BINDIR)$(MINGW_HOST)-ar$(EXE_EXT)),)
+                                CROSS_AR := $(CROSS_BINDIR)$(MINGW_HOST)-ar
+                        else ifneq ($(wildcard $(CROSS_BINDIR)ar$(EXE_EXT)),)
+                                CROSS_AR := $(CROSS_BINDIR)ar
                         endif
                 endif
         endif
