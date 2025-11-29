@@ -16,7 +16,9 @@ DEBUG ?= 0
 # Always include the replace operation when creating archives. Some of the
 # generated MinGW makefiles override ARFLAGS to "-cs" (no operation), which
 # causes binutils ar to fail with "no operation specified" on recursive builds.
-override ARFLAGS := rcs
+# Keep the leading dash so generated commands look like "-rcs" even if the
+# sub-makefiles expect flag-style arguments.
+override ARFLAGS := -rcs
 export ARFLAGS
 
 # Enable rollback-savestate optimizations in the libretro core by default.
@@ -101,7 +103,7 @@ BUILDFLAGS = REGENIE=$(REGENIE) VERBOSE=$(VERBOSE) NOWERROR=$(NOWERROR) OSD=retr
 # Ensure archive creation always uses the rebuilding "r" flag; some generated
 # mingw archives (e.g. liboptional.a) can have no members, and "-cs" alone is a
 # fatal error with binutils.
-BUILDFLAGS += ARFLAGS=rcs
+BUILDFLAGS += ARFLAGS=-rcs
 
 ifneq ($(PYTHON_EXECUTABLE),)
         BUILDFLAGS += PYTHON_EXECUTABLE=$(PYTHON_EXECUTABLE)
