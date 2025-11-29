@@ -177,26 +177,48 @@ ifneq ($(findstring win,$(platform)),)
 
         # Provide sensible MinGW defaults when the caller doesn't supply a
         # cross toolchain explicitly so "platform=win64" works out of the box
-        # on typical mingw-w64 setups.
+        # on typical mingw-w64 setups. On MSYS2 runners, prefer absolute tool
+        # paths under /mingw32 or /mingw64 to avoid PATH ordering issues.
+        ifeq ($(PTR64),0)
+                MINGW_HOST ?= i686-w64-mingw32
+                MINGW_PREFIX ?= /mingw32
+        else
+                MINGW_HOST ?= x86_64-w64-mingw32
+                MINGW_PREFIX ?= /mingw64
+        endif
+
         ifeq ($(CROSS_CC),)
+                ifeq ($(OS),Windows_NT)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/$(MINGW_HOST)-gcc.exe),)
+                                CROSS_CC  := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-gcc
+                                CROSS_CXX := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-g++
+                                CROSS_AR  := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-ar
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-windres
+                        endif
+                endif
+        endif
+
+        ifeq ($(CROSS_CC),)
+                CROSS_CC  := $(MINGW_HOST)-gcc
+                CROSS_CXX := $(MINGW_HOST)-g++
+                CROSS_AR  := $(MINGW_HOST)-ar
+                CROSS_WINDRES := $(MINGW_HOST)-windres
                 ifeq ($(PTR64),0)
-                        CROSS_CC  := i686-w64-mingw32-gcc
-                        CROSS_CXX := i686-w64-mingw32-g++
-                        CROSS_AR  := i686-w64-mingw32-ar
-                        CROSS_WINDRES := i686-w64-mingw32-windres
                         ifndef MINGW32
                                 MINGW32 := /usr/i686-w64-mingw32
                         endif
                         PLATFLAGS += MINGW32=$(MINGW32)
                 else
-                        CROSS_CC  := x86_64-w64-mingw32-gcc
-                        CROSS_CXX := x86_64-w64-mingw32-g++
-                        CROSS_AR  := x86_64-w64-mingw32-ar
-                        CROSS_WINDRES := x86_64-w64-mingw32-windres
                         ifndef MINGW64
                                 MINGW64 := /usr/x86_64-w64-mingw32
                         endif
                         PLATFLAGS += MINGW64=$(MINGW64)
+                endif
+        else ifeq ($(OS),Windows_NT)
+                ifeq ($(PTR64),0)
+                        PLATFLAGS += MINGW32=$(MINGW_PREFIX)
+                else
+                        PLATFLAGS += MINGW64=$(MINGW_PREFIX)
                 endif
         endif
 
