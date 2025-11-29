@@ -20,6 +20,9 @@ DEBUG ?= 0
 # sub-makefiles expect flag-style arguments.
 override ARFLAGS := -rcs
 export ARFLAGS
+# Make sure recursive makes keep the replace flag even if generated
+# makefiles reset ARFLAGS back to "-cs".
+MAKEFLAGS += ARFLAGS=-rcs
 
 # Enable rollback-savestate optimizations in the libretro core by default.
 # Can be disabled by passing SAVESTATE_ROLLBACK=0 on the make command line
