@@ -51,7 +51,7 @@ UNAME_S = $(shell uname -s)
 UNAME_M = $(shell uname -m)
 
 ifeq ($(platform),)
-	platform = unix
+        platform = unix
 	ifeq ($(UNAME_S),)
 		platform = win
 	else ifneq ($(findstring MINGW,$(UNAME_S)),)
@@ -65,6 +65,15 @@ ifeq ($(platform),)
 	else ifeq ($(UNAME_M), i686)
 		platform = linux
 	endif
+endif
+
+# Skip GENie regeneration for Windows libretro builds so they behave like the
+# original standalone Makefile.libretro flow. The generated project files in
+# build/projects/retro/mame are sufficient for these targets, and bypassing
+# GENie avoids host-tool churn on MSYS2 runners.
+ifneq ($(findstring win,$(platform)),)
+        REGENIE := 0
+        $(info skipping GENie regeneration for Windows libretro builds)
 endif
 ifneq ($(ARCH),)
 	LIBRETRO_CPU = $(ARCH)
