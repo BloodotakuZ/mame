@@ -196,46 +196,82 @@ ifneq ($(findstring win,$(platform)),)
                 MINGW_PREFIX ?= /mingw64
         endif
 
+        MINGW_CC_CANDIDATES := $(MINGW_HOST)-gcc
+        MINGW_CXX_CANDIDATES := $(MINGW_HOST)-g++
+        ifneq ($(findstring clang,$(platform)),)
+                MINGW_CC_CANDIDATES := $(MINGW_HOST)-clang $(MINGW_CC_CANDIDATES)
+                MINGW_CXX_CANDIDATES := $(MINGW_HOST)-clang++ $(MINGW_CXX_CANDIDATES)
+        endif
+
         # First, see if the host PATH already exposes a usable mingw-w64
         # toolchain. This catches MSYS2 installs placed under custom prefixes
         # (e.g. /d/a/_temp/msys64/mingw64) where /mingw64 isn't present.
         ifeq ($(CROSS_CC),)
-                CROSS_CC := $(shell command -v $(MINGW_HOST)-gcc 2> /dev/null)
-                CROSS_CXX := $(shell command -v $(MINGW_HOST)-g++ 2> /dev/null)
+                CROSS_CC := $(firstword $(foreach cc,$(MINGW_CC_CANDIDATES),$(shell command -v $(cc) 2> /dev/null)))
+                CROSS_CXX := $(firstword $(foreach cxx,$(MINGW_CXX_CANDIDATES),$(shell command -v $(cxx) 2> /dev/null)))
                 CROSS_AR := $(shell command -v $(MINGW_HOST)-ar 2> /dev/null)
                 CROSS_WINDRES := $(shell command -v $(MINGW_HOST)-windres 2> /dev/null)
         endif
 
+        ifeq ($(CROSS_AR),)
+                CROSS_AR := $(shell command -v llvm-ar 2> /dev/null)
+        endif
+        ifeq ($(CROSS_WINDRES),)
+                CROSS_WINDRES := $(shell command -v llvm-windres 2> /dev/null)
+        endif
+
         ifeq ($(CROSS_CC),)
                 ifeq ($(OS),Windows_NT)
-                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/$(MINGW_HOST)-gcc.exe),)
-                                CROSS_CC  := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-gcc
-                                CROSS_CXX := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-g++
+                        CROSS_CC := $(firstword $(foreach cc,$(MINGW_CC_CANDIDATES),$(if $(wildcard $(MINGW_PREFIX)/bin/$(cc).exe),$(MINGW_PREFIX)/bin/$(cc))))
+                        CROSS_CXX := $(firstword $(foreach cxx,$(MINGW_CXX_CANDIDATES),$(if $(wildcard $(MINGW_PREFIX)/bin/$(cxx).exe),$(MINGW_PREFIX)/bin/$(cxx))))
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/$(MINGW_HOST)-ar.exe),)
                                 CROSS_AR  := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-ar
+                        endif
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/$(MINGW_HOST)-windres.exe),)
                                 CROSS_WINDRES := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-windres
                         endif
                 endif
         endif
 
-        # If we located a compiler on PATH but not an archiver, try to reuse
-        # the same bin directory so archive steps don't point at a nonexistent
-        # /mingwXX/bin.
-        ifeq ($(CROSS_AR),)
+        # If we located a compiler on PATH but not an archiver or windres, try
+        # to reuse the same bin directory so archive/resource steps don't point
+        # at a nonexistent /mingwXX/bin.
+        ifeq ($(CROSS_BINDIR),)
                 ifneq ($(filter %/,$(dir $(CROSS_CC))),)
                         CROSS_BINDIR := $(dir $(CROSS_CC))
+                endif
+        endif
+        ifeq ($(CROSS_AR),)
+                ifneq ($(CROSS_BINDIR),)
                         ifneq ($(wildcard $(CROSS_BINDIR)$(MINGW_HOST)-ar$(EXE_EXT)),)
                                 CROSS_AR := $(CROSS_BINDIR)$(MINGW_HOST)-ar
+                        else ifneq ($(wildcard $(CROSS_BINDIR)llvm-ar$(EXE_EXT)),)
+                                CROSS_AR := $(CROSS_BINDIR)llvm-ar
                         else ifneq ($(wildcard $(CROSS_BINDIR)ar$(EXE_EXT)),)
                                 CROSS_AR := $(CROSS_BINDIR)ar
                         endif
                 endif
         endif
+        ifeq ($(CROSS_WINDRES),)
+                ifneq ($(CROSS_BINDIR),)
+                        ifneq ($(wildcard $(CROSS_BINDIR)$(MINGW_HOST)-windres$(EXE_EXT)),)
+                                CROSS_WINDRES := $(CROSS_BINDIR)$(MINGW_HOST)-windres
+                        else ifneq ($(wildcard $(CROSS_BINDIR)llvm-windres$(EXE_EXT)),)
+                                CROSS_WINDRES := $(CROSS_BINDIR)llvm-windres
+                        else ifneq ($(wildcard $(CROSS_BINDIR)windres$(EXE_EXT)),)
+                                CROSS_WINDRES := $(CROSS_BINDIR)windres
+                        endif
+                endif
+        endif
 
-        # If the prefixed archiver is missing on MSYS2, fall back to the plain
-        # ar that ships with the mingw-w64 toolchain so archive steps don't
-        # point at a non-existent /mingwXX/bin/x86_64-w64-mingw32-ar.
+        # If the prefixed archiver or windres is missing on MSYS2, fall back to
+        # the plain tools that ship with the mingw-w64 toolchain so archive and
+        # resource steps don't point at a non-existent /mingwXX/bin path.
         ifneq ($(OS),Windows_NT)
                 ifeq ($(CROSS_AR),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/llvm-ar.exe),)
+                                CROSS_AR := $(MINGW_PREFIX)/bin/llvm-ar
+                        endif
                         ifneq ($(wildcard $(MINGW_PREFIX)/bin/ar.exe),)
                                 CROSS_AR := $(MINGW_PREFIX)/bin/ar
                         endif
@@ -244,17 +280,40 @@ ifneq ($(findstring win,$(platform)),)
                                 CROSS_AR := $(MINGW_PREFIX)/bin/ar
                         endif
                 endif
+                ifeq ($(CROSS_WINDRES),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/llvm-windres.exe),)
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/llvm-windres
+                        endif
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/windres.exe),)
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/windres
+                        endif
+                else ifeq ($(wildcard $(CROSS_WINDRES)$(EXE_EXT)),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/windres.exe),)
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/windres
+                        endif
+                endif
         else
                 ifeq ($(CROSS_AR),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/llvm-ar.exe),)
+                                CROSS_AR := $(MINGW_PREFIX)/bin/llvm-ar
+                        endif
                         ifneq ($(wildcard $(MINGW_PREFIX)/bin/ar.exe),)
                                 CROSS_AR := $(MINGW_PREFIX)/bin/ar
+                        endif
+                endif
+                ifeq ($(CROSS_WINDRES),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/llvm-windres.exe),)
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/llvm-windres
+                        endif
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/windres.exe),)
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/windres
                         endif
                 endif
         endif
 
         ifeq ($(CROSS_CC),)
-                CROSS_CC  := $(MINGW_HOST)-gcc
-                CROSS_CXX := $(MINGW_HOST)-g++
+                CROSS_CC  := $(firstword $(MINGW_CC_CANDIDATES))
+                CROSS_CXX := $(firstword $(MINGW_CXX_CANDIDATES))
                 CROSS_AR  := $(MINGW_HOST)-ar
                 CROSS_WINDRES := $(MINGW_HOST)-windres
                 ifeq ($(PTR64),0)
@@ -297,6 +356,26 @@ ifneq ($(findstring win,$(platform)),)
         endif
         ifneq ($(CROSS_WINDRES),)
                 PLATFLAGS += WINDRES=$(CROSS_WINDRES)
+        endif
+
+        # Ensure a usable MinGW-w64 toolchain is available before invoking the
+        # generated makefiles so we fail fast with a helpful message instead of a
+        # missing /bin/x86_64-w64-mingw32-g++ error from recursive builds.
+        CROSS_CC_OK := $(shell if [ -n "$(CROSS_CC)" ] && { [ -x "$(CROSS_CC)$(EXE_EXT)" ] || command -v $(CROSS_CC) > /dev/null 2>&1; }; then echo ok; fi)
+        CROSS_CXX_OK := $(shell if [ -n "$(CROSS_CXX)" ] && { [ -x "$(CROSS_CXX)$(EXE_EXT)" ] || command -v $(CROSS_CXX) > /dev/null 2>&1; }; then echo ok; fi)
+        CROSS_AR_OK := $(shell if [ -n "$(CROSS_AR)" ] && { [ -x "$(CROSS_AR)$(EXE_EXT)" ] || command -v $(CROSS_AR) > /dev/null 2>&1; }; then echo ok; fi)
+        CROSS_WINDRES_OK := $(shell if [ -n "$(CROSS_WINDRES)" ] && { [ -x "$(CROSS_WINDRES)$(EXE_EXT)" ] || command -v $(CROSS_WINDRES) > /dev/null 2>&1; }; then echo ok; fi)
+        ifeq ($(CROSS_CC_OK),)
+                $(error unable to locate MinGW cross C compiler "$(CROSS_CC)"; install a $(MINGW_HOST) toolchain (e.g. $(firstword $(MINGW_CC_CANDIDATES)) from mingw-w64) or set CROSS_CC)
+        endif
+        ifeq ($(CROSS_CXX_OK),)
+                $(error unable to locate MinGW cross C++ compiler "$(CROSS_CXX)"; install a $(MINGW_HOST) toolchain (e.g. $(firstword $(MINGW_CXX_CANDIDATES)) from mingw-w64) or set CROSS_CXX)
+        endif
+        ifeq ($(CROSS_AR_OK),)
+                $(error unable to locate MinGW cross archiver "$(CROSS_AR)"; install the $(MINGW_HOST) binutils package or set CROSS_AR)
+        endif
+        ifeq ($(CROSS_WINDRES_OK),)
+                $(error unable to locate MinGW windres "$(CROSS_WINDRES)"; install the $(MINGW_HOST) binutils package or set CROSS_WINDRES)
         endif
 endif
 # android only needs a valid ANDROID_NDK_HOME set no paths are needed toolchain and makefile takes care of that
