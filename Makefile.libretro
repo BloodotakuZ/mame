@@ -298,6 +298,16 @@ ifneq ($(findstring win,$(platform)),)
         ifneq ($(CROSS_WINDRES),)
                 PLATFLAGS += WINDRES=$(CROSS_WINDRES)
         endif
+
+        # Ensure a usable MinGW-w64 toolchain is available before invoking the
+        # generated makefiles so we fail fast with a helpful message instead of a
+        # missing /bin/x86_64-w64-mingw32-g++ error from recursive builds.
+        ifeq ($(shell command -v $(CROSS_CC) 2> /dev/null),)
+                $(error unable to locate MinGW cross C compiler "$(CROSS_CC)"; install a $(MINGW_HOST) toolchain (e.g. g++-mingw-w64-x86-64) or set CROSS_CC)
+        endif
+        ifeq ($(shell command -v $(CROSS_CXX) 2> /dev/null),)
+                $(error unable to locate MinGW cross C++ compiler "$(CROSS_CXX)"; install a $(MINGW_HOST) toolchain (e.g. g++-mingw-w64-x86-64) or set CROSS_CXX)
+        endif
 endif
 # android only needs a valid ANDROID_NDK_HOME set no paths are needed toolchain and makefile takes care of that
 # make CONFIG=libretero OSD=retro android-xxx is all thes required
