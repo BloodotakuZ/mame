@@ -196,22 +196,31 @@ ifneq ($(findstring win,$(platform)),)
                 MINGW_PREFIX ?= /mingw64
         endif
 
+        MINGW_CC_CANDIDATES := $(MINGW_HOST)-gcc
+        MINGW_CXX_CANDIDATES := $(MINGW_HOST)-g++
+        ifneq ($(findstring clang,$(platform)),)
+                MINGW_CC_CANDIDATES := $(MINGW_HOST)-clang $(MINGW_CC_CANDIDATES)
+                MINGW_CXX_CANDIDATES := $(MINGW_HOST)-clang++ $(MINGW_CXX_CANDIDATES)
+        endif
+
         # First, see if the host PATH already exposes a usable mingw-w64
         # toolchain. This catches MSYS2 installs placed under custom prefixes
         # (e.g. /d/a/_temp/msys64/mingw64) where /mingw64 isn't present.
         ifeq ($(CROSS_CC),)
-                CROSS_CC := $(shell command -v $(MINGW_HOST)-gcc 2> /dev/null)
-                CROSS_CXX := $(shell command -v $(MINGW_HOST)-g++ 2> /dev/null)
+                CROSS_CC := $(firstword $(foreach cc,$(MINGW_CC_CANDIDATES),$(shell command -v $(cc) 2> /dev/null)))
+                CROSS_CXX := $(firstword $(foreach cxx,$(MINGW_CXX_CANDIDATES),$(shell command -v $(cxx) 2> /dev/null)))
                 CROSS_AR := $(shell command -v $(MINGW_HOST)-ar 2> /dev/null)
                 CROSS_WINDRES := $(shell command -v $(MINGW_HOST)-windres 2> /dev/null)
         endif
 
         ifeq ($(CROSS_CC),)
                 ifeq ($(OS),Windows_NT)
-                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/$(MINGW_HOST)-gcc.exe),)
-                                CROSS_CC  := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-gcc
-                                CROSS_CXX := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-g++
+                        CROSS_CC := $(firstword $(foreach cc,$(MINGW_CC_CANDIDATES),$(if $(wildcard $(MINGW_PREFIX)/bin/$(cc).exe),$(MINGW_PREFIX)/bin/$(cc))))
+                        CROSS_CXX := $(firstword $(foreach cxx,$(MINGW_CXX_CANDIDATES),$(if $(wildcard $(MINGW_PREFIX)/bin/$(cxx).exe),$(MINGW_PREFIX)/bin/$(cxx))))
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/$(MINGW_HOST)-ar.exe),)
                                 CROSS_AR  := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-ar
+                        endif
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/$(MINGW_HOST)-windres.exe),)
                                 CROSS_WINDRES := $(MINGW_PREFIX)/bin/$(MINGW_HOST)-windres
                         endif
                 endif
@@ -253,8 +262,8 @@ ifneq ($(findstring win,$(platform)),)
         endif
 
         ifeq ($(CROSS_CC),)
-                CROSS_CC  := $(MINGW_HOST)-gcc
-                CROSS_CXX := $(MINGW_HOST)-g++
+                CROSS_CC  := $(firstword $(MINGW_CC_CANDIDATES))
+                CROSS_CXX := $(firstword $(MINGW_CXX_CANDIDATES))
                 CROSS_AR  := $(MINGW_HOST)-ar
                 CROSS_WINDRES := $(MINGW_HOST)-windres
                 ifeq ($(PTR64),0)
@@ -307,10 +316,10 @@ ifneq ($(findstring win,$(platform)),)
         CROSS_AR_OK := $(shell if [ -n "$(CROSS_AR)" ] && { [ -x "$(CROSS_AR)$(EXE_EXT)" ] || command -v $(CROSS_AR) > /dev/null 2>&1; }; then echo ok; fi)
         CROSS_WINDRES_OK := $(shell if [ -n "$(CROSS_WINDRES)" ] && { [ -x "$(CROSS_WINDRES)$(EXE_EXT)" ] || command -v $(CROSS_WINDRES) > /dev/null 2>&1; }; then echo ok; fi)
         ifeq ($(CROSS_CC_OK),)
-                $(error unable to locate MinGW cross C compiler "$(CROSS_CC)"; install a $(MINGW_HOST) toolchain (e.g. g++-mingw-w64-x86-64) or set CROSS_CC)
+                $(error unable to locate MinGW cross C compiler "$(CROSS_CC)"; install a $(MINGW_HOST) toolchain (e.g. $(firstword $(MINGW_CC_CANDIDATES)) from mingw-w64) or set CROSS_CC)
         endif
         ifeq ($(CROSS_CXX_OK),)
-                $(error unable to locate MinGW cross C++ compiler "$(CROSS_CXX)"; install a $(MINGW_HOST) toolchain (e.g. g++-mingw-w64-x86-64) or set CROSS_CXX)
+                $(error unable to locate MinGW cross C++ compiler "$(CROSS_CXX)"; install a $(MINGW_HOST) toolchain (e.g. $(firstword $(MINGW_CXX_CANDIDATES)) from mingw-w64) or set CROSS_CXX)
         endif
         ifeq ($(CROSS_AR_OK),)
                 $(error unable to locate MinGW cross archiver "$(CROSS_AR)"; install the $(MINGW_HOST) binutils package or set CROSS_AR)
