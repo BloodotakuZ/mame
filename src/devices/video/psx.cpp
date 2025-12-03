@@ -14,6 +14,8 @@
 
 #include "screen.h"
 
+#include <algorithm>
+
 
 #define STOP_ON_ERROR ( 0 )
 
@@ -52,7 +54,7 @@ psxgpu_device::psxgpu_device(const machine_config &mconfig, device_type type, co
 
 void psxgpu_device::device_start()
 {
-	screen().register_vblank_callback(vblank_state_delegate(&psxgpu_device::vblank, this));
+        screen().register_vblank_callback(vblank_state_delegate(&psxgpu_device::vblank, this));
 
 	for( int n_colour = 0; n_colour < 0x10000; n_colour++ )
 	{
@@ -503,7 +505,12 @@ void psxgpu_device::psx_gpu_init( int n_gputype )
 	n_lightgun_y = 0;
 	b_reverseflag = 0;
 
-	p_vram = make_unique_clear<uint16_t[]>(width * height );
+        p_vram = make_unique_clear<uint16_t[]>(width * height );
+
+m_vram_words = width * height;
+	m_vram_compact_words = 0;
+m_vram_compact.clear();
+m_vram_unpack_pending = false;
 
 	for( int n_line = 0; n_line < 1024; n_line++ )
 	{
@@ -601,14 +608,19 @@ void psxgpu_device::psx_gpu_init( int n_gputype )
 		}
 	}
 
-	save_pointer(NAME(p_vram), width * height );
-	save_item(NAME(m_packet.n_entry));
-	save_item(NAME(n_gpu_buffer_offset));
-	save_item(NAME(n_vramx));
-	save_item(NAME(n_vramy));
-	save_item(NAME(n_twy));
-	save_item(NAME(n_twx));
-	save_item(NAME(n_tww));
+machine().save().register_presave(save_prepost_delegate(FUNC(psxgpu_device::pack_vram_for_save), this));
+machine().save().register_postload(save_prepost_delegate(FUNC(psxgpu_device::mark_vram_dirty_after_load), this));
+
+        save_item(NAME(m_vram_compact_words));
+        save_item(NAME(m_vram_compact));
+        save_item(NAME(m_packet.n_entry));
+        save_item(NAME(n_gpu_buffer_offset));
+        save_item(NAME(n_vramx));
+        save_item(NAME(n_vramy));
+        save_item(NAME(n_twy));
+        save_item(NAME(n_twx));
+        save_item(NAME(n_twh));
+        save_item(NAME(n_tww));
 	save_item(NAME(n_drawarea_x1));
 	save_item(NAME(n_drawarea_y1));
 	save_item(NAME(n_drawarea_x2));
@@ -634,19 +646,78 @@ void psxgpu_device::psx_gpu_init( int n_gputype )
 	save_item(NAME(n_iy));
 	save_item(NAME(n_ti));
 	save_item(NAME(m_draw_stp));
-	save_item(NAME(m_check_stp));
+        save_item(NAME(m_check_stp));
+}
+
+void psxgpu_device::pack_vram_for_save()
+{
+        if (!p_vram)
+        {
+                return;
+        }
+
+        uint32_t words = m_vram_words;
+        while (words > 0 && p_vram[words - 1] == 0)
+        {
+                --words;
+        }
+
+        m_vram_compact_words = words;
+        if (m_vram_compact.size() < m_vram_compact_words)
+        {
+                m_vram_compact.resize(m_vram_compact_words);
+        }
+        std::copy_n(p_vram.get(), m_vram_compact_words, m_vram_compact.begin());
+
+        if (m_vram_compact_words < m_vram_words)
+        {
+                std::fill(p_vram.get() + m_vram_compact_words, p_vram.get() + m_vram_words, 0);
+        }
+}
+
+void psxgpu_device::unpack_vram_after_load()
+{
+        if (!p_vram)
+        {
+                return;
+        }
+
+        std::fill_n(p_vram.get(), m_vram_words, 0);
+
+        if (m_vram_compact_words != 0 && m_vram_compact.size() >= m_vram_compact_words)
+        {
+                std::copy_n(m_vram_compact.data(), m_vram_compact_words, p_vram.get());
+        }
+
+        m_vram_unpack_pending = false;
 }
 
 void psxgpu_device::device_post_load()
 {
-	updatevisiblearea();
+        mark_vram_dirty_after_load();
+        updatevisiblearea();
+}
+
+void psxgpu_device::mark_vram_dirty_after_load()
+{
+        m_vram_unpack_pending = true;
+}
+
+void psxgpu_device::ensure_vram_ready()
+{
+        if (m_vram_unpack_pending)
+        {
+                unpack_vram_after_load();
+        }
 }
 
 uint32_t psxgpu_device::update_screen(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	uint32_t n_x;
-	uint32_t n_y;
-	int n_top;
+        ensure_vram_ready();
+
+        uint32_t n_x;
+        uint32_t n_y;
+        int n_top;
 	int n_line;
 	int n_lines;
 	int n_left;
@@ -2760,8 +2831,10 @@ void psxgpu_device::dma_write( uint32_t *p_n_psxram, uint32_t n_address, int32_t
 
 void psxgpu_device::gpu_write( uint32_t *p_ram, int32_t n_size )
 {
-	while( n_size > 0 )
-	{
+ensure_vram_ready();
+
+while( n_size > 0 )
+{
 		uint32_t data = *( p_ram );
 
 		LOG("PSX Packet #%u %08x\n", n_gpu_buffer_offset, data);
@@ -3414,8 +3487,10 @@ void psxgpu_device::dma_read( uint32_t *p_n_psxram, uint32_t n_address, int32_t 
 
 void psxgpu_device::gpu_read( uint32_t *p_ram, int32_t n_size )
 {
-	while( n_size > 0 )
-	{
+ensure_vram_ready();
+
+while( n_size > 0 )
+{
 		if( ( n_gpustatus & ( 1L << 0x1b ) ) != 0 )
 		{
 			PAIR data;
