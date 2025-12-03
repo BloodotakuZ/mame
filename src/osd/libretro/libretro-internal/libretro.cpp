@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <algorithm>
+#include <cinttypes>
+#include <map>
+#include <vector>
 
 #include "osdepend.h"
 
@@ -19,6 +23,7 @@
 #include "libretro.h"
 #include "libretro_shared.h"
 #include "libretro_core_options.h"
+#include "osdcore.h"
 
 #ifndef RETRO_ROLLBACK_SAVESTATES
 #define RETRO_ROLLBACK_SAVESTATES 0
@@ -50,6 +55,23 @@ static uint8_t *serialize_buffer = serialize_buffer_storage;
 static const size_t serialize_buffer_capacity = MAX_STATE_SIZE;
 static size_t serialize_size_normal = 0;
 static size_t serialize_size_rollback = 0;
+static bool serialize_size_reported = false;
+
+static constexpr uint64_t SERIALIZE_PROFILE_PERIOD_FRAMES = 120;
+static constexpr uint64_t SERIALIZE_SPIKE_THRESHOLD_USEC = 500; /* 0.5 ms */
+
+struct serialize_profile_stats
+{
+   uint64_t ticks_accum = 0;
+   uint64_t ticks_min = UINT64_MAX;
+   uint64_t ticks_max = 0;
+   uint64_t samples = 0;
+   uint64_t last_ticks = 0;
+};
+
+static serialize_profile_stats serialize_profile;
+static serialize_profile_stats unserialize_profile;
+static uint64_t serialize_profile_frame_counter = 0;
 
 #if RETRO_ROLLBACK_SAVESTATES
 static uint8_t rollback_state_ring[MAX_ROLLBACK_FRAMES][MAX_STATE_SIZE];
@@ -67,6 +89,12 @@ static bool rollback_context_active(void);
 static bool rollback_ring_capture_frame(void);
 static bool rollback_ring_restore_frame(unsigned frames_ago);
 #endif
+
+static void log_serialize_profile_report(void);
+static void record_profile_sample(serialize_profile_stats &stats, uint64_t ticks);
+static double ticks_to_ms(uint64_t ticks);
+static void log_state_size_breakdown(save_manager &save);
+static void reset_profile_stats(serialize_profile_stats &stats);
 
 int fb_width       = 640;
 int fb_height      = 480;
@@ -873,6 +901,10 @@ void retro_run(void)
    rollback_ring_capture_frame();
 #endif
 
+   serialize_profile_frame_counter++;
+   if ((serialize_profile_frame_counter % SERIALIZE_PROFILE_PERIOD_FRAMES) == 0)
+      log_serialize_profile_report();
+
    /* Automatic loading fast-forward */
    if (autoloadfastforward)
       retro_autoloadfastforwarding();
@@ -979,6 +1011,7 @@ static void reset_serialize_cache(void)
 {
    serialize_size_normal = 0;
    serialize_size_rollback = 0;
+   serialize_size_reported = false;
    reset_rollback_ring();
 }
 
@@ -1017,6 +1050,8 @@ static void prepare_serialize_cache(void)
 #if RETRO_ROLLBACK_SAVESTATES
    configure_rollback_ring();
 #endif
+
+   log_state_size_breakdown(save);
 }
 
 static size_t current_context_serialize_size(bool rollback_context)
@@ -1099,6 +1134,113 @@ static bool rollback_ring_capture_frame(void)
 }
 #endif
 
+static void reset_profile_stats(serialize_profile_stats &stats)
+{
+   stats.ticks_accum = 0;
+   stats.ticks_max = 0;
+   stats.ticks_min = UINT64_MAX;
+   stats.samples = 0;
+   stats.last_ticks = 0;
+}
+
+static double ticks_to_ms(uint64_t ticks)
+{
+   return (ticks * 1000.0) / static_cast<double>(osd_ticks_per_second());
+}
+
+static void record_profile_sample(serialize_profile_stats &stats, uint64_t ticks)
+{
+   stats.last_ticks = ticks;
+   stats.ticks_accum += ticks;
+   stats.ticks_max = std::max(stats.ticks_max, ticks);
+   stats.ticks_min = std::min(stats.ticks_min, ticks);
+   stats.samples++;
+}
+
+static void log_state_size_breakdown(save_manager &save)
+{
+   if (!log_cb || serialize_size_reported)
+      return;
+
+   size_t total_bytes = 0;
+   size_t largest_bytes = 0;
+   std::string largest_name;
+   std::map<std::string, size_t> module_buckets;
+
+   for (int index = 0; index < save.registration_count(); ++index)
+   {
+      void *base = nullptr;
+      u32 valsize = 0;
+      u32 valcount = 0;
+      u32 blockcount = 0;
+      u32 stride = 0;
+      const char *name = save.indexed_item(index, base, valsize, valcount, blockcount, stride);
+
+      if (!name)
+         continue;
+
+      const size_t block_bytes = static_cast<size_t>(valsize) * static_cast<size_t>(valcount) * static_cast<size_t>(blockcount);
+      total_bytes += block_bytes;
+
+      if (block_bytes > largest_bytes)
+      {
+         largest_bytes = block_bytes;
+         largest_name = name;
+      }
+
+      const char *dot = strchr(name, '.');
+      const std::string module = dot ? std::string(name, dot - name) : std::string(name);
+      module_buckets[module] += block_bytes;
+   }
+
+   if (total_bytes == 0)
+      return;
+
+   std::vector<std::pair<std::string, size_t>> ranked_modules(module_buckets.begin(), module_buckets.end());
+   std::sort(ranked_modules.begin(), ranked_modules.end(), [](const auto &lhs, const auto &rhs) {
+      return lhs.second > rhs.second;
+   });
+
+   log_cb(RETRO_LOG_INFO, "[savestate] total state size %zu bytes; largest block %s = %zu bytes\n",
+         total_bytes, largest_name.c_str(), largest_bytes);
+
+   const size_t bucket_limit = 5;
+   for (size_t i = 0; i < ranked_modules.size() && i < bucket_limit; ++i)
+      log_cb(RETRO_LOG_INFO, "[savestate] top module %zu: %s = %zu bytes (%.2f %%)\n", i + 1, ranked_modules[i].first.c_str(),
+            ranked_modules[i].second, (100.0 * static_cast<double>(ranked_modules[i].second)) / static_cast<double>(total_bytes));
+
+   serialize_size_reported = true;
+}
+
+static void log_serialize_profile_report(void)
+{
+   if (!log_cb)
+      return;
+
+   const auto log_stats = [&](const char *label, const serialize_profile_stats &stats)
+   {
+      if (stats.samples == 0)
+         return;
+
+      const double avg_ms = ticks_to_ms(stats.ticks_accum / stats.samples);
+      const double min_ms = ticks_to_ms(stats.ticks_min);
+      const double max_ms = ticks_to_ms(stats.ticks_max);
+      const double last_ms = ticks_to_ms(stats.last_ticks);
+      const uint64_t spike_ticks = (osd_ticks_per_second() * SERIALIZE_SPIKE_THRESHOLD_USEC) / 1000000ULL;
+      const bool spike = stats.last_ticks >= spike_ticks;
+
+      log_cb(RETRO_LOG_INFO,
+            "[savestate] %s avg %.3f ms, min %.3f ms, max %.3f ms over %" PRIu64 " samples (last %.3f ms)%s\n",
+            label, avg_ms, min_ms, max_ms, static_cast<uint64_t>(stats.samples), last_ms, spike ? " [spike]" : "");
+   };
+
+   log_stats("serialize", serialize_profile);
+   log_stats("unserialize", unserialize_profile);
+
+   reset_profile_stats(serialize_profile);
+   reset_profile_stats(unserialize_profile);
+}
+
 /* Stubs */
 size_t retro_serialize_size(void)
 {
@@ -1126,6 +1268,9 @@ size_t retro_serialize_size(void)
 }
 bool retro_serialize(void *data, size_t size)
 {
+   const osd_ticks_t start = osd_ticks();
+   bool result = false;
+
    if (     mame_machine_manager::instance() != NULL
               && mame_machine_manager::instance()->machine() != NULL
               && ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
@@ -1141,29 +1286,34 @@ bool retro_serialize(void *data, size_t size)
       uint8_t *target = (uint8_t*)data;
 
       if (expected_size == 0)
-         return false;
+         goto out;
 
       if (target == NULL)
       {
          if (serialize_buffer_capacity < expected_size)
-            return false;
+            goto out;
          target = serialize_buffer;
       }
       else if (size < expected_size)
-         return false;
+         goto out;
 
-      return rollback_context
+      result = rollback_context
             ? (save.write_rollback_buffer(target, expected_size) == STATERR_NONE)
             : (save.write_buffer(target, expected_size) == STATERR_NONE);
    }
 
-   return false;
+out:
+   record_profile_sample(serialize_profile, osd_ticks() - start);
+   return result;
 }
 bool retro_unserialize(const void *data, size_t size)
 {
+   const osd_ticks_t start = osd_ticks();
+   bool result = false;
+
    if (     mame_machine_manager::instance() != NULL
          && mame_machine_manager::instance()->machine() != NULL
-         &&	ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
+         &&     ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
    {
       save_manager &save = mame_machine_manager::instance()->machine()->save();
       const bool rollback_context =
@@ -1175,14 +1325,16 @@ bool retro_unserialize(const void *data, size_t size)
       const size_t expected_size = current_context_serialize_size(rollback_context);
 
       if (expected_size == 0 || data == NULL || size < expected_size)
-         return false;
+         goto out;
 
-      return rollback_context
+      result = rollback_context
             ? (save.read_rollback_buffer((const u8*)data, expected_size) == STATERR_NONE)
             : (save.read_buffer((const u8*)data, expected_size) == STATERR_NONE);
    }
 
-   return false;
+out:
+   record_profile_sample(unserialize_profile, osd_ticks() - start);
+   return result;
 }
 
 unsigned retro_get_region (void) { return RETRO_REGION_NTSC; }
