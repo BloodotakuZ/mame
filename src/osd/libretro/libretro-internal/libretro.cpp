@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "osdepend.h"
 
@@ -23,6 +24,9 @@
 #define RETRO_ROLLBACK_SAVESTATES 0
 #endif
 
+#define MAX_ROLLBACK_FRAMES 15
+#define MAX_STATE_SIZE (4 * 1024 * 1024)
+
 /* forward decls / externs / prototypes */
 
 extern void retro_finish();
@@ -39,6 +43,30 @@ bool libretro_supports_bitmasks = false;
 static bool libretro_supports_option_categories = false;
 bool libretro_supports_ff_override = false;
 bool libretro_ff_enabled = false;
+
+/* Savestate scratch space */
+static uint8_t serialize_buffer_storage[MAX_STATE_SIZE];
+static uint8_t *serialize_buffer = serialize_buffer_storage;
+static const size_t serialize_buffer_capacity = MAX_STATE_SIZE;
+static size_t serialize_size_normal = 0;
+static size_t serialize_size_rollback = 0;
+
+#if RETRO_ROLLBACK_SAVESTATES
+static uint8_t rollback_state_ring[MAX_ROLLBACK_FRAMES][MAX_STATE_SIZE];
+static size_t rollback_state_size = 0;
+static unsigned rollback_ring_index = 0;
+static bool rollback_ring_ready = false;
+#else
+static inline void reset_rollback_ring(void) {}
+#endif
+
+#if RETRO_ROLLBACK_SAVESTATES
+static void reset_rollback_ring(void);
+static void configure_rollback_ring(void);
+static bool rollback_context_active(void);
+static bool rollback_ring_capture_frame(void);
+static bool rollback_ring_restore_frame(unsigned frames_ago);
+#endif
 
 int fb_width       = 640;
 int fb_height      = 480;
@@ -817,6 +845,7 @@ void retro_init(void)
 void retro_deinit(void)
 {
    free_output_audio_buffer();
+   free_serialize_buffer_memory();
    if (retro_load_ok)
       retro_finish();
 }
@@ -839,6 +868,10 @@ void retro_run(void)
    if (!retro_pause)
       retro_main_loop();
    RLOOP = 1;
+
+#if RETRO_ROLLBACK_SAVESTATES
+   rollback_ring_capture_frame();
+#endif
 
    /* Automatic loading fast-forward */
    if (autoloadfastforward)
@@ -874,6 +907,7 @@ void retro_run(void)
 
 bool retro_load_game(const struct retro_game_info *info)
 {
+   reset_serialize_cache();
    retro_load_ok = false;
 
    check_variables();
@@ -922,6 +956,7 @@ bool retro_load_game(const struct retro_game_info *info)
 
    retro_load_ok = true;
    update_runtime_variables(true);
+   prepare_serialize_cache();
 
    return true;
 }
@@ -932,10 +967,67 @@ void retro_unload_game(void)
          && mame_machine_manager::instance()->machine() != NULL
          && mame_machine_manager::instance()->machine()->options().autosave()
          && (mame_machine_manager::instance()->machine()->system().flags & MACHINE_SUPPORTS_SAVE) != 0)
-	  mame_machine_manager::instance()->machine()->immediate_save("auto");
+          mame_machine_manager::instance()->machine()->immediate_save("auto");
 
    if (retro_pause == 0)
       retro_pause = -1;
+
+   reset_serialize_cache();
+}
+
+static void reset_serialize_cache(void)
+{
+   serialize_size_normal = 0;
+   serialize_size_rollback = 0;
+   reset_rollback_ring();
+}
+
+static size_t serialize_capacity_needed(void)
+{
+   return (serialize_size_rollback > serialize_size_normal)
+         ? serialize_size_rollback
+         : serialize_size_normal;
+}
+
+static void prepare_serialize_cache(void)
+{
+   if (     mame_machine_manager::instance() == NULL
+         || mame_machine_manager::instance()->machine() == NULL)
+      return;
+
+   save_manager &save = mame_machine_manager::instance()->machine()->save();
+   serialize_size_normal = ram_state::get_size(save);
+
+#if RETRO_ROLLBACK_SAVESTATES
+   save.build_rollback_layout();
+   serialize_size_rollback = save.rollback_state_size();
+#else
+   serialize_size_rollback = 0;
+#endif
+
+   const size_t required = serialize_capacity_needed();
+   if (required > serialize_buffer_capacity)
+   {
+      reset_serialize_cache();
+      if (log_cb)
+         log_cb(RETRO_LOG_ERROR, "Serialize buffer too small (%zu > %zu)\n", required, serialize_buffer_capacity);
+      return;
+   }
+
+#if RETRO_ROLLBACK_SAVESTATES
+   configure_rollback_ring();
+#endif
+}
+
+static size_t current_context_serialize_size(bool rollback_context)
+{
+   return rollback_context ? serialize_size_rollback : serialize_size_normal;
+}
+
+static void free_serialize_buffer_memory(void)
+{
+   serialize_buffer = serialize_buffer_storage;
+   reset_serialize_cache();
 }
 
 static retro_savestate_context current_savestate_context()
@@ -952,12 +1044,67 @@ static retro_savestate_context current_savestate_context()
 #endif
 }
 
+#if RETRO_ROLLBACK_SAVESTATES
+static bool rollback_context_active(void)
+{
+   return current_savestate_context() == RETRO_SAVESTATE_CONTEXT_ROLLBACK_NETPLAY;
+}
+
+static void reset_rollback_ring(void)
+{
+   rollback_ring_index = 0;
+   rollback_state_size = 0;
+   rollback_ring_ready = false;
+}
+
+static void configure_rollback_ring(void)
+{
+   rollback_ring_ready = false;
+   rollback_ring_index = 0;
+   rollback_state_size = serialize_size_rollback;
+
+   if (rollback_state_size == 0)
+      return;
+
+   if (rollback_state_size > MAX_STATE_SIZE)
+   {
+      if (log_cb)
+         log_cb(RETRO_LOG_ERROR, "Rollback state size %zu exceeds MAX_STATE_SIZE %d\n", rollback_state_size, MAX_STATE_SIZE);
+      rollback_state_size = 0;
+      return;
+   }
+
+   rollback_ring_ready = true;
+}
+
+static bool rollback_ring_capture_frame(void)
+{
+   if (!rollback_ring_ready || !rollback_context_active() || rollback_state_size == 0)
+      return false;
+
+   if (!retro_serialize(rollback_state_ring[rollback_ring_index], rollback_state_size))
+      return false;
+
+   rollback_ring_index = (rollback_ring_index + 1) % MAX_ROLLBACK_FRAMES;
+   return true;
+}
+
+[[maybe_unused]] static bool rollback_ring_restore_frame(unsigned frames_ago)
+{
+   if (!rollback_ring_ready || rollback_state_size == 0 || frames_ago >= MAX_ROLLBACK_FRAMES)
+      return false;
+
+   const unsigned slot = (rollback_ring_index + MAX_ROLLBACK_FRAMES - 1 - frames_ago) % MAX_ROLLBACK_FRAMES;
+   return retro_unserialize(rollback_state_ring[slot], rollback_state_size);
+}
+#endif
+
 /* Stubs */
 size_t retro_serialize_size(void)
 {
    if (     mame_machine_manager::instance() != NULL
-              && mame_machine_manager::instance()->machine() != NULL
-              && ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
+             && mame_machine_manager::instance()->machine() != NULL
+             && ram_state::get_size(mame_machine_manager::instance()->machine()->save()) > 0)
    {
       save_manager &save = mame_machine_manager::instance()->machine()->save();
       const bool rollback_context =
@@ -966,6 +1113,10 @@ size_t retro_serialize_size(void)
 #else
             false;
 #endif
+      const size_t cached_size = current_context_serialize_size(rollback_context);
+      if (cached_size != 0)
+         return cached_size;
+
       return rollback_context
             ? save.rollback_state_size()
             : ram_state::get_size(save);
@@ -986,9 +1137,24 @@ bool retro_serialize(void *data, size_t size)
 #else
             false;
 #endif
+      const size_t expected_size = current_context_serialize_size(rollback_context);
+      uint8_t *target = (uint8_t*)data;
+
+      if (expected_size == 0)
+         return false;
+
+      if (target == NULL)
+      {
+         if (serialize_buffer_capacity < expected_size)
+            return false;
+         target = serialize_buffer;
+      }
+      else if (size < expected_size)
+         return false;
+
       return rollback_context
-            ? (save.write_rollback_buffer((u8*)data, size) == STATERR_NONE)
-            : (save.write_buffer((u8*)data, size) == STATERR_NONE);
+            ? (save.write_rollback_buffer(target, expected_size) == STATERR_NONE)
+            : (save.write_buffer(target, expected_size) == STATERR_NONE);
    }
 
    return false;
@@ -1006,9 +1172,14 @@ bool retro_unserialize(const void *data, size_t size)
 #else
             false;
 #endif
+      const size_t expected_size = current_context_serialize_size(rollback_context);
+
+      if (expected_size == 0 || data == NULL || size < expected_size)
+         return false;
+
       return rollback_context
-            ? (save.read_rollback_buffer((u8*)data, size) == STATERR_NONE)
-            : (save.read_buffer((u8*)data, size) == STATERR_NONE);
+            ? (save.read_rollback_buffer((const u8*)data, expected_size) == STATERR_NONE)
+            : (save.read_buffer((const u8*)data, expected_size) == STATERR_NONE);
    }
 
    return false;

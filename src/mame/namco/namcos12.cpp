@@ -1207,38 +1207,44 @@ public:
 		m_jvs->set_default_option("namco_cyberlead");
 	}
 
-protected:
-	// driver_device
-	virtual void driver_start() override ATTR_COLD
-	{
-		m_mainbank->configure_entries(0, memregion("bankedroms")->bytes() / 0x200000, memregion("bankedroms")->base(), 0x200000);
-		m_mainbank->set_entry(0);
-
-		m_dmaoffset = 0;
-		m_bankoffset = 0;
-		m_sub_port8 = 0;
-		m_sub_porta = 0;
-		m_sub_portb = 0x50;
-		m_tektagdmaoffset = 0;
-
-		save_item(NAME(m_dmaoffset));
-		save_item(NAME(m_bankoffset));
-		save_item(NAME(m_jvs_sense));
-		save_item(NAME(m_sub_porta));
-		save_item(NAME(m_sub_portb));
-		save_item(NAME(m_tektagdmaoffset));
-	}
-
-	virtual void driver_reset() override ATTR_COLD
-	{
-		if (m_boot_hack)
+	protected:
+		// driver_device
+		virtual void driver_start() override ATTR_COLD
 		{
-			uint8_t *rom = m_mainrom->base() + 0x20280;
-			uint8_t *ram = m_ram->pointer() + 0x10000;
+			m_mainbank->configure_entries(0, memregion("bankedroms")->bytes() / 0x200000, memregion("bankedroms")->base(), 0x200000);
+			m_mainbank->set_entry(0);
 
-			std::copy_n(rom, 12, ram);
+			m_dmaoffset = 0;
+			m_bankoffset = 0;
+			m_sub_port8 = 0;
+			m_sub_porta = 0;
+			m_sub_portb = 0x50;
+			m_tektagdmaoffset = 0;
+
+			// Force a deterministic power-on snapshot for the RTC so recordings and rollback
+			// do not inherit the host wall clock.  The clock device persists its registers
+			// via state saving, so this only seeds the very first boot in a predictable way.
+			m_rtc->set_time(true, 2000, 1, 1, 6, 0, 0);
+
+			save_item(NAME(m_dmaoffset));
+			save_item(NAME(m_bankoffset));
+			save_item(NAME(m_jvs_sense));
+			save_item(NAME(m_sub_port8));
+			save_item(NAME(m_sub_porta));
+			save_item(NAME(m_sub_portb));
+			save_item(NAME(m_tektagdmaoffset));
 		}
-	}
+
+		virtual void driver_reset() override ATTR_COLD
+		{
+			if (m_boot_hack)
+			{
+				uint8_t *rom = m_mainrom->base() + 0x20280;
+				uint8_t *ram = m_ram->pointer() + 0x10000;
+
+				std::copy_n(rom, 12, ram);
+			}
+		}
 
 	virtual void maincpu_map(address_map &map) ATTR_COLD
 	{

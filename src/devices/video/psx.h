@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include <vector>
+
 #define PSXGPU_DEBUG_VIEWER ( 0 )
 
 DECLARE_DEVICE_TYPE(CXD8514Q,  cxd8514q_device)
@@ -213,24 +215,29 @@ private:
 	void Sprite16x16();
 	void Dot();
 	void TexturedDot();
-	void MoveImage();
-	void psx_gpu_init( int n_gputype );
-	void gpu_reset();
-	void gpu_read( uint32_t *p_ram, int32_t n_size );
-	void gpu_write( uint32_t *p_ram, int32_t n_size );
+        void MoveImage();
+        void pack_vram_for_save();
+        void unpack_vram_after_load();
+        void psx_gpu_init( int n_gputype );
+        void gpu_reset();
+        void gpu_read( uint32_t *p_ram, int32_t n_size );
+        void gpu_write( uint32_t *p_ram, int32_t n_size );
 
 	int32_t m_n_tx;
 	int32_t m_n_ty;
 	int32_t n_abr;
 	int32_t n_tp;
-	int32_t n_ix;
-	int32_t n_iy;
-	int32_t n_ti;
+        int32_t n_ix;
+        int32_t n_iy;
+        int32_t n_ti;
 
-	std::unique_ptr<uint16_t[]> p_vram;
-	uint32_t n_vramx;
-	uint32_t n_vramy;
-	uint32_t n_twy;
+        std::unique_ptr<uint16_t[]> p_vram;
+        std::vector<uint16_t> m_vram_compact;
+        uint32_t m_vram_compact_words;
+        uint32_t m_vram_words;
+        uint32_t n_vramx;
+        uint32_t n_vramy;
+        uint32_t n_twy;
 	uint32_t n_twx;
 	uint32_t n_twh;
 	uint32_t n_tww;
