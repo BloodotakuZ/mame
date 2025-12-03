@@ -105,7 +105,7 @@ namcos12_cdxa_device::namcos12_cdxa_device(const machine_config &mconfig, const 
         , m_mb87078(*this, "mb87078")
         , m_icd2061a(*this, "icd2061a")
         , m_psx_int10_cb(*this)
-        , m_audio_resync(false)
+        , m_audio_phase_dirty(false)
 {
 }
 
@@ -160,7 +160,7 @@ void namcos12_cdxa_device::device_reset()
         m_audio_cur_bit = 0;
         m_volume_write_counter = 0;
         m_audio_lrck = 1; // start with left channel first
-        m_audio_resync = false;
+        m_audio_phase_dirty = false;
 
 	m_maincpu->set_input_line(INPUT_LINE_RESET, ASSERT_LINE);
 }
@@ -207,9 +207,22 @@ void namcos12_cdxa_device::sh7014_map(address_map &map)
 	// map(0x00c20000, 0x00c3ffff).rw(FUNC(namcos12_cdxa_device::sh2_cdrom_cs1_r), FUNC(namcos12_cdxa_device::sh2_cdrom_cs1_w));
 }
 
+// Keep postload callbacks O(1): mark audio alignment dirty and rebuild lazily on the next DAC edge
 void namcos12_cdxa_device::postload_audio_resync()
 {
-        m_audio_resync = true;
+        mark_audio_phase_dirty();
+}
+
+void namcos12_cdxa_device::mark_audio_phase_dirty()
+{
+        m_audio_phase_dirty = true;
+}
+
+void namcos12_cdxa_device::resync_audio_phase()
+{
+        m_audio_cur_bit = 0;
+        m_audio_lrck = 1;
+        m_audio_phase_dirty = false;
 }
 
 void namcos12_cdxa_device::reset_sh2_w(uint16_t data)
@@ -305,12 +318,8 @@ void namcos12_cdxa_device::mb87078_gain_changed(offs_t offset, uint8_t data)
 
 void namcos12_cdxa_device::audio_dac_w(int state)
 {
-        if (m_audio_resync)
-        {
-                m_audio_cur_bit = 0;
-                m_audio_lrck = 1;
-                m_audio_resync = false;
-        }
+        if (m_audio_phase_dirty)
+                resync_audio_phase();
 
         m_lc78836m->bclk_w(0);
         m_lc78836m->lrck_w(m_audio_lrck);

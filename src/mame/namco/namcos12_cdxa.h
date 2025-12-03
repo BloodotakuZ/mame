@@ -65,6 +65,8 @@ private:
         void trigger_psx_int10_w(offs_t offset, uint16_t data, uint16_t mem_mask = ~0);
 
         void postload_audio_resync();
+        void mark_audio_phase_dirty();
+        void resync_audio_phase();
 
 	uint16_t sh2_cdrom_cs0_r(offs_t offset, uint16_t mem_mask = ~0);
 	void sh2_cdrom_cs0_w(offs_t offset, uint16_t data, uint16_t mem_mask = ~0);
@@ -89,7 +91,7 @@ private:
 
         uint8_t m_volume_write_counter;
 
-        bool m_audio_resync;
+        bool m_audio_phase_dirty;
 };
 
 DECLARE_DEVICE_TYPE(NAMCOS12_CDXA, namcos12_cdxa_device)
