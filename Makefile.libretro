@@ -298,6 +298,26 @@ ifneq ($(findstring win,$(platform)),)
         ifneq ($(CROSS_WINDRES),)
                 PLATFLAGS += WINDRES=$(CROSS_WINDRES)
         endif
+
+        # Ensure a usable MinGW-w64 toolchain is available before invoking the
+        # generated makefiles so we fail fast with a helpful message instead of a
+        # missing /bin/x86_64-w64-mingw32-g++ error from recursive builds.
+        CROSS_CC_OK := $(shell if [ -n "$(CROSS_CC)" ] && { [ -x "$(CROSS_CC)$(EXE_EXT)" ] || command -v $(CROSS_CC) > /dev/null 2>&1; }; then echo ok; fi)
+        CROSS_CXX_OK := $(shell if [ -n "$(CROSS_CXX)" ] && { [ -x "$(CROSS_CXX)$(EXE_EXT)" ] || command -v $(CROSS_CXX) > /dev/null 2>&1; }; then echo ok; fi)
+        CROSS_AR_OK := $(shell if [ -n "$(CROSS_AR)" ] && { [ -x "$(CROSS_AR)$(EXE_EXT)" ] || command -v $(CROSS_AR) > /dev/null 2>&1; }; then echo ok; fi)
+        CROSS_WINDRES_OK := $(shell if [ -n "$(CROSS_WINDRES)" ] && { [ -x "$(CROSS_WINDRES)$(EXE_EXT)" ] || command -v $(CROSS_WINDRES) > /dev/null 2>&1; }; then echo ok; fi)
+        ifeq ($(CROSS_CC_OK),)
+                $(error unable to locate MinGW cross C compiler "$(CROSS_CC)"; install a $(MINGW_HOST) toolchain (e.g. g++-mingw-w64-x86-64) or set CROSS_CC)
+        endif
+        ifeq ($(CROSS_CXX_OK),)
+                $(error unable to locate MinGW cross C++ compiler "$(CROSS_CXX)"; install a $(MINGW_HOST) toolchain (e.g. g++-mingw-w64-x86-64) or set CROSS_CXX)
+        endif
+        ifeq ($(CROSS_AR_OK),)
+                $(error unable to locate MinGW cross archiver "$(CROSS_AR)"; install the $(MINGW_HOST) binutils package or set CROSS_AR)
+        endif
+        ifeq ($(CROSS_WINDRES_OK),)
+                $(error unable to locate MinGW windres "$(CROSS_WINDRES)"; install the $(MINGW_HOST) binutils package or set CROSS_WINDRES)
+        endif
 endif
 # android only needs a valid ANDROID_NDK_HOME set no paths are needed toolchain and makefile takes care of that
 # make CONFIG=libretero OSD=retro android-xxx is all thes required
