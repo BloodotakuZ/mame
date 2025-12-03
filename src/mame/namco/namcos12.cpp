@@ -1078,32 +1078,33 @@ class namcos12_state :
 	public driver_device
 {
 public:
-	namcos12_state(const machine_config &mconfig, device_type type, const char *tag) :
-		driver_device(mconfig, type, tag),
-		m_maincpu(*this, "maincpu"),
-		m_screen(*this, "screen"),
-		m_ram(*this, "maincpu:ram"),
-		m_gpu(*this, "gpu"),
-		m_sub(*this, "sub"),
-		m_adc(*this, "sub:adc"),
-		m_jvs(*this, "jvs"),
-		m_jvs_system(*this, "JVS_SYSTEM"),
-		m_jvs_player(*this, "JVS_PLAYER%u", 1U),
-		m_jvs_coin(*this, "JVS_COIN%u", 1U),
-		m_rtc(*this, "rtc"),
-		m_settings(*this, "namco_settings"),
-		m_sharedram(*this, "sharedram"),
-		m_mainrom(*this, "maincpu:rom"),
-		m_bankedroms(*this, "bankedroms"),
-		m_mainbank(*this, "mainbank"),
-		m_alt_bank(false),
-		m_boot_hack(false),
-		m_has_tektagt_dma(false),
-		m_jamma(true),
-		m_jvs_support(true),
-		m_jvs_sense(jvs_port_device::sense::None)
-	{
-	}
+namcos12_state(const machine_config &mconfig, device_type type, const char *tag) :
+driver_device(mconfig, type, tag),
+m_maincpu(*this, "maincpu"),
+m_screen(*this, "screen"),
+m_ram(*this, "maincpu:ram"),
+m_gpu(*this, "gpu"),
+m_sub(*this, "sub"),
+m_adc(*this, "sub:adc"),
+m_jvs(*this, "jvs"),
+m_jvs_system(*this, "JVS_SYSTEM"),
+m_jvs_player(*this, "JVS_PLAYER%u", 1U),
+m_jvs_coin(*this, "JVS_COIN%u", 1U),
+m_rtc(*this, "rtc"),
+m_settings(*this, "namco_settings"),
+m_sharedram(*this, "sharedram"),
+m_mainrom(*this, "maincpu:rom"),
+m_bankedroms(*this, "bankedroms"),
+m_mainbank(*this, "mainbank"),
+m_alt_bank(false),
+m_boot_hack(false),
+m_has_tektagt_dma(false),
+m_jamma(true),
+m_jvs_support(true),
+m_jvs_sense(jvs_port_device::sense::None),
+m_prot_rng_state(0)
+{
+}
 
 	// CPU PCB COH700
 	void coh700(machine_config &config) ATTR_COLD
@@ -1216,10 +1217,11 @@ public:
 
 			m_dmaoffset = 0;
 			m_bankoffset = 0;
-			m_sub_port8 = 0;
-			m_sub_porta = 0;
-			m_sub_portb = 0x50;
-			m_tektagdmaoffset = 0;
+m_sub_port8 = 0;
+m_sub_porta = 0;
+m_sub_portb = 0x50;
+m_tektagdmaoffset = 0;
+m_prot_rng_state = 0x12f0a5b7U;
 
 			// Force a deterministic power-on snapshot for the RTC so recordings and rollback
 			// do not inherit the host wall clock.  The clock device persists its registers
@@ -1229,10 +1231,11 @@ public:
 			save_item(NAME(m_dmaoffset));
 			save_item(NAME(m_bankoffset));
 			save_item(NAME(m_jvs_sense));
-			save_item(NAME(m_sub_port8));
-			save_item(NAME(m_sub_porta));
-			save_item(NAME(m_sub_portb));
-			save_item(NAME(m_tektagdmaoffset));
+save_item(NAME(m_sub_port8));
+save_item(NAME(m_sub_porta));
+save_item(NAME(m_sub_portb));
+save_item(NAME(m_prot_rng_state));
+save_item(NAME(m_tektagdmaoffset));
 		}
 
 		virtual void driver_reset() override ATTR_COLD
@@ -1482,12 +1485,13 @@ public:
 	bool m_jvs_support;
 
 	uint32_t m_dmaoffset;
-	uint16_t m_bankoffset;
-	uint8_t m_jvs_sense;
-	uint8_t m_sub_port8;
-	uint8_t m_sub_porta;
-	uint8_t m_sub_portb;
-	uint32_t m_tektagdmaoffset;
+uint16_t m_bankoffset;
+uint8_t m_jvs_sense;
+uint8_t m_sub_port8;
+uint8_t m_sub_porta;
+uint8_t m_sub_portb;
+uint32_t m_prot_rng_state;
+uint32_t m_tektagdmaoffset;
 };
 
 class namcos12_altbank_state :
@@ -1872,17 +1876,18 @@ protected:
 	}
 
 	void tektagt_protection_2_w(offs_t offset, uint16_t data)
-	{
-		switch (offset)
-		{
-		case 0:
-			// Writes are 0 or machine().rand(), only used as a "start prot value write" trigger
-			m_ttt_cnt = 0;
-			break;
-		case 1:
-			break;
-		}
-	}
+{
+        switch (offset)
+{
+                case 0:
+                        // Writes are 0 or machine().rand(), only used as a "start prot value write" trigger
+                        m_ttt_cnt = 0;
+                        m_prot_rng_state = (m_prot_rng_state * 1664525U) + 1013904223U;
+                        break;
+                case 1:
+                        break;
+        }
+}
 
 	uint16_t tektagt_protection_2_r(offs_t offset)
 	{
