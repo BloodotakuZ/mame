@@ -226,12 +226,16 @@ ifneq ($(findstring win,$(platform)),)
                 endif
         endif
 
-        # If we located a compiler on PATH but not an archiver, try to reuse
-        # the same bin directory so archive steps don't point at a nonexistent
-        # /mingwXX/bin.
-        ifeq ($(CROSS_AR),)
+        # If we located a compiler on PATH but not an archiver or windres, try
+        # to reuse the same bin directory so archive/resource steps don't point
+        # at a nonexistent /mingwXX/bin.
+        ifeq ($(CROSS_BINDIR),)
                 ifneq ($(filter %/,$(dir $(CROSS_CC))),)
                         CROSS_BINDIR := $(dir $(CROSS_CC))
+                endif
+        endif
+        ifeq ($(CROSS_AR),)
+                ifneq ($(CROSS_BINDIR),)
                         ifneq ($(wildcard $(CROSS_BINDIR)$(MINGW_HOST)-ar$(EXE_EXT)),)
                                 CROSS_AR := $(CROSS_BINDIR)$(MINGW_HOST)-ar
                         else ifneq ($(wildcard $(CROSS_BINDIR)ar$(EXE_EXT)),)
@@ -239,10 +243,19 @@ ifneq ($(findstring win,$(platform)),)
                         endif
                 endif
         endif
+        ifeq ($(CROSS_WINDRES),)
+                ifneq ($(CROSS_BINDIR),)
+                        ifneq ($(wildcard $(CROSS_BINDIR)$(MINGW_HOST)-windres$(EXE_EXT)),)
+                                CROSS_WINDRES := $(CROSS_BINDIR)$(MINGW_HOST)-windres
+                        else ifneq ($(wildcard $(CROSS_BINDIR)windres$(EXE_EXT)),)
+                                CROSS_WINDRES := $(CROSS_BINDIR)windres
+                        endif
+                endif
+        endif
 
-        # If the prefixed archiver is missing on MSYS2, fall back to the plain
-        # ar that ships with the mingw-w64 toolchain so archive steps don't
-        # point at a non-existent /mingwXX/bin/x86_64-w64-mingw32-ar.
+        # If the prefixed archiver or windres is missing on MSYS2, fall back to
+        # the plain tools that ship with the mingw-w64 toolchain so archive and
+        # resource steps don't point at a non-existent /mingwXX/bin path.
         ifneq ($(OS),Windows_NT)
                 ifeq ($(CROSS_AR),)
                         ifneq ($(wildcard $(MINGW_PREFIX)/bin/ar.exe),)
@@ -253,10 +266,24 @@ ifneq ($(findstring win,$(platform)),)
                                 CROSS_AR := $(MINGW_PREFIX)/bin/ar
                         endif
                 endif
+                ifeq ($(CROSS_WINDRES),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/windres.exe),)
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/windres
+                        endif
+                else ifeq ($(wildcard $(CROSS_WINDRES)$(EXE_EXT)),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/windres.exe),)
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/windres
+                        endif
+                endif
         else
                 ifeq ($(CROSS_AR),)
                         ifneq ($(wildcard $(MINGW_PREFIX)/bin/ar.exe),)
                                 CROSS_AR := $(MINGW_PREFIX)/bin/ar
+                        endif
+                endif
+                ifeq ($(CROSS_WINDRES),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/windres.exe),)
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/windres
                         endif
                 endif
         endif
