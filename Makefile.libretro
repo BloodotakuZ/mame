@@ -213,6 +213,13 @@ ifneq ($(findstring win,$(platform)),)
                 CROSS_WINDRES := $(shell command -v $(MINGW_HOST)-windres 2> /dev/null)
         endif
 
+        ifeq ($(CROSS_AR),)
+                CROSS_AR := $(shell command -v llvm-ar 2> /dev/null)
+        endif
+        ifeq ($(CROSS_WINDRES),)
+                CROSS_WINDRES := $(shell command -v llvm-windres 2> /dev/null)
+        endif
+
         ifeq ($(CROSS_CC),)
                 ifeq ($(OS),Windows_NT)
                         CROSS_CC := $(firstword $(foreach cc,$(MINGW_CC_CANDIDATES),$(if $(wildcard $(MINGW_PREFIX)/bin/$(cc).exe),$(MINGW_PREFIX)/bin/$(cc))))
@@ -238,6 +245,8 @@ ifneq ($(findstring win,$(platform)),)
                 ifneq ($(CROSS_BINDIR),)
                         ifneq ($(wildcard $(CROSS_BINDIR)$(MINGW_HOST)-ar$(EXE_EXT)),)
                                 CROSS_AR := $(CROSS_BINDIR)$(MINGW_HOST)-ar
+                        else ifneq ($(wildcard $(CROSS_BINDIR)llvm-ar$(EXE_EXT)),)
+                                CROSS_AR := $(CROSS_BINDIR)llvm-ar
                         else ifneq ($(wildcard $(CROSS_BINDIR)ar$(EXE_EXT)),)
                                 CROSS_AR := $(CROSS_BINDIR)ar
                         endif
@@ -247,6 +256,8 @@ ifneq ($(findstring win,$(platform)),)
                 ifneq ($(CROSS_BINDIR),)
                         ifneq ($(wildcard $(CROSS_BINDIR)$(MINGW_HOST)-windres$(EXE_EXT)),)
                                 CROSS_WINDRES := $(CROSS_BINDIR)$(MINGW_HOST)-windres
+                        else ifneq ($(wildcard $(CROSS_BINDIR)llvm-windres$(EXE_EXT)),)
+                                CROSS_WINDRES := $(CROSS_BINDIR)llvm-windres
                         else ifneq ($(wildcard $(CROSS_BINDIR)windres$(EXE_EXT)),)
                                 CROSS_WINDRES := $(CROSS_BINDIR)windres
                         endif
@@ -258,6 +269,9 @@ ifneq ($(findstring win,$(platform)),)
         # resource steps don't point at a non-existent /mingwXX/bin path.
         ifneq ($(OS),Windows_NT)
                 ifeq ($(CROSS_AR),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/llvm-ar.exe),)
+                                CROSS_AR := $(MINGW_PREFIX)/bin/llvm-ar
+                        endif
                         ifneq ($(wildcard $(MINGW_PREFIX)/bin/ar.exe),)
                                 CROSS_AR := $(MINGW_PREFIX)/bin/ar
                         endif
@@ -267,6 +281,9 @@ ifneq ($(findstring win,$(platform)),)
                         endif
                 endif
                 ifeq ($(CROSS_WINDRES),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/llvm-windres.exe),)
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/llvm-windres
+                        endif
                         ifneq ($(wildcard $(MINGW_PREFIX)/bin/windres.exe),)
                                 CROSS_WINDRES := $(MINGW_PREFIX)/bin/windres
                         endif
@@ -277,11 +294,17 @@ ifneq ($(findstring win,$(platform)),)
                 endif
         else
                 ifeq ($(CROSS_AR),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/llvm-ar.exe),)
+                                CROSS_AR := $(MINGW_PREFIX)/bin/llvm-ar
+                        endif
                         ifneq ($(wildcard $(MINGW_PREFIX)/bin/ar.exe),)
                                 CROSS_AR := $(MINGW_PREFIX)/bin/ar
                         endif
                 endif
                 ifeq ($(CROSS_WINDRES),)
+                        ifneq ($(wildcard $(MINGW_PREFIX)/bin/llvm-windres.exe),)
+                                CROSS_WINDRES := $(MINGW_PREFIX)/bin/llvm-windres
+                        endif
                         ifneq ($(wildcard $(MINGW_PREFIX)/bin/windres.exe),)
                                 CROSS_WINDRES := $(MINGW_PREFIX)/bin/windres
                         endif
